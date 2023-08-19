@@ -100,6 +100,15 @@ impl Consumer {
         let mut proc_start = Measure::start("consume_buffered_process");
         let num_packets_to_process = unprocessed_transaction_storage.len();
 
+        let is_vote = match unprocessed_transaction_storage {
+            UnprocessedTransactionStorage::VoteStorage(_) => {
+                true
+            }
+            UnprocessedTransactionStorage::LocalTransactionStorage(_) => {
+                false
+            }
+        };
+
         let reached_end_of_slot = unprocessed_transaction_storage.process_packets(
             bank_start.working_bank.clone(),
             banking_stage_stats,
@@ -112,6 +121,7 @@ impl Consumer {
                     &mut consumed_buffered_packets_count,
                     &mut rebuffered_packet_count,
                     packets_to_process,
+                    is_vote
                 )
             },
         );
@@ -151,6 +161,7 @@ impl Consumer {
         consumed_buffered_packets_count: &mut usize,
         rebuffered_packet_count: &mut usize,
         packets_to_process: &Vec<Arc<ImmutableDeserializedPacket>>,
+        is_vote: bool
     ) -> Option<Vec<usize>> {
         if payload.reached_end_of_slot {
             return None;
@@ -164,6 +175,7 @@ impl Consumer {
                 &payload.sanitized_transactions,
                 banking_stage_stats,
                 payload.slot_metrics_tracker,
+                is_vote
             ));
         payload
             .slot_metrics_tracker
@@ -211,9 +223,10 @@ impl Consumer {
         sanitized_transactions: &[SanitizedTransaction],
         banking_stage_stats: &BankingStageStats,
         slot_metrics_tracker: &mut LeaderSlotMetricsTracker,
+        is_vote: bool
     ) -> ProcessTransactionsSummary {
         let (mut process_transactions_summary, process_transactions_us) = measure_us!(
-            self.process_transactions(bank, bank_creation_time, sanitized_transactions)
+            self.process_transactions(bank, bank_creation_time, sanitized_transactions, is_vote)
         );
         slot_metrics_tracker.increment_process_transactions_us(process_transactions_us);
         banking_stage_stats
@@ -268,6 +281,7 @@ impl Consumer {
         bank: &Arc<Bank>,
         bank_creation_time: &Instant,
         transactions: &[SanitizedTransaction],
+        is_vote: bool
     ) -> ProcessTransactionsSummary {
         let mut chunk_start = 0;
         let mut all_retryable_tx_indexes = vec![];
@@ -295,6 +309,7 @@ impl Consumer {
                 bank,
                 &transactions[chunk_start..chunk_end],
                 chunk_start,
+                is_vote
             );
 
             let ProcessTransactionBatchOutput {
@@ -393,10 +408,11 @@ impl Consumer {
         bank: &Arc<Bank>,
         txs: &[SanitizedTransaction],
         chunk_offset: usize,
+        is_vote: bool
     ) -> ProcessTransactionBatchOutput {
         // No filtering before QoS - transactions should have been sanitized immediately prior to this call
         let pre_results = std::iter::repeat(Ok(()));
-        self.process_and_record_transactions_with_pre_results(bank, txs, chunk_offset, pre_results)
+        self.process_and_record_transactions_with_pre_results(bank, txs, chunk_offset, pre_results, is_vote)
     }
 
     pub fn process_and_record_aged_transactions(
@@ -429,7 +445,7 @@ impl Consumer {
             }
             Ok(())
         });
-        self.process_and_record_transactions_with_pre_results(bank, txs, 0, pre_results)
+        self.process_and_record_transactions_with_pre_results(bank, txs, 0, pre_results, false)
     }
 
     fn process_and_record_transactions_with_pre_results(
@@ -438,6 +454,7 @@ impl Consumer {
         txs: &[SanitizedTransaction],
         chunk_offset: usize,
         pre_results: impl Iterator<Item = Result<(), TransactionError>>,
+        is_vote: bool
     ) -> ProcessTransactionBatchOutput {
         let (
             (transaction_qos_cost_results, cost_model_throttled_transactions_count),
@@ -463,7 +480,7 @@ impl Consumer {
         // WouldExceedMaxAccountCostLimit, WouldExceedMaxVoteCostLimit
         // and WouldExceedMaxAccountDataCostLimit
         let mut execute_and_commit_transactions_output =
-            self.execute_and_commit_transactions_locked(bank, &batch);
+            self.execute_and_commit_transactions_locked(bank, &batch, is_vote);
 
         // Once the accounts are new transactions can enter the pipeline to process them
         let (_, unlock_us) = measure_us!(drop(batch));
@@ -529,6 +546,7 @@ impl Consumer {
         &self,
         bank: &Arc<Bank>,
         batch: &TransactionBatch,
+        is_vote: bool
     ) -> ExecuteAndCommitTransactionsOutput {
         let transaction_status_sender_enabled = self.committer.transaction_status_sender_enabled();
         let mut execute_and_commit_timings = LeaderExecuteAndCommitTimings::default();
@@ -589,7 +607,7 @@ impl Consumer {
 
         let (record_transactions_summary, record_us) = measure_us!(self
             .transaction_recorder
-            .record_transactions(bank.slot(), executed_transactions));
+            .record_transactions(bank.slot(), executed_transactions, is_vote));
         execute_and_commit_timings.record_us = record_us;
 
         let RecordTransactionsSummary {
@@ -810,7 +828,7 @@ mod tests {
         );
         let consumer = Consumer::new(committer, recorder, QosService::new(1), None);
         let process_transactions_summary =
-            consumer.process_transactions(&bank, &Instant::now(), &transactions);
+            consumer.process_transactions(&bank, &Instant::now(), &transactions, false);
 
         poh_recorder
             .read()
@@ -967,7 +985,7 @@ mod tests {
             let consumer = Consumer::new(committer, recorder, QosService::new(1), None);
 
             let process_transactions_batch_output =
-                consumer.process_and_record_transactions(&bank, &transactions, 0);
+                consumer.process_and_record_transactions(&bank, &transactions, 0, false);
 
             let ExecuteAndCommitTransactionsOutput {
                 transactions_attempted_execution_count,
@@ -1012,7 +1030,7 @@ mod tests {
             )]);
 
             let process_transactions_batch_output =
-                consumer.process_and_record_transactions(&bank, &transactions, 0);
+                consumer.process_and_record_transactions(&bank, &transactions, 0, false);
 
             let ExecuteAndCommitTransactionsOutput {
                 transactions_attempted_execution_count,
@@ -1094,7 +1112,7 @@ mod tests {
             let consumer = Consumer::new(committer, recorder, QosService::new(1), None);
 
             let process_transactions_batch_output =
-                consumer.process_and_record_transactions(&bank, &transactions, 0);
+                consumer.process_and_record_transactions(&bank, &transactions, 0, false);
 
             let ExecuteAndCommitTransactionsOutput {
                 transactions_attempted_execution_count,
@@ -1196,7 +1214,7 @@ mod tests {
             )]);
 
             let process_transactions_batch_output =
-                consumer.process_and_record_transactions(&bank, &transactions, 0);
+                consumer.process_and_record_transactions(&bank, &transactions, 0, false);
 
             let ExecuteAndCommitTransactionsOutput {
                 executed_with_successful_result_count,
@@ -1227,7 +1245,7 @@ mod tests {
             ]);
 
             let process_transactions_batch_output =
-                consumer.process_and_record_transactions(&bank, &transactions, 0);
+                consumer.process_and_record_transactions(&bank, &transactions, 0, false);
 
             let ExecuteAndCommitTransactionsOutput {
                 executed_with_successful_result_count,
@@ -1330,7 +1348,7 @@ mod tests {
             let consumer = Consumer::new(committer, recorder, QosService::new(1), None);
 
             let process_transactions_batch_output =
-                consumer.process_and_record_transactions(&bank, &transactions, 0);
+                consumer.process_and_record_transactions(&bank, &transactions, 0, false);
 
             poh_recorder
                 .read()
@@ -1527,7 +1545,7 @@ mod tests {
             let consumer = Consumer::new(committer, recorder.clone(), QosService::new(1), None);
 
             let process_transactions_summary =
-                consumer.process_transactions(&bank, &Instant::now(), &transactions);
+                consumer.process_transactions(&bank, &Instant::now(), &transactions, false);
 
             let ProcessTransactionsSummary {
                 reached_max_poh_height,
@@ -1651,7 +1669,7 @@ mod tests {
             );
             let consumer = Consumer::new(committer, recorder, QosService::new(1), None);
 
-            let _ = consumer.process_and_record_transactions(&bank, &transactions, 0);
+            let _ = consumer.process_and_record_transactions(&bank, &transactions, 0, false);
 
             drop(consumer); // drop/disconnect transaction_status_sender
             transaction_status_service.join().unwrap();
@@ -1788,7 +1806,7 @@ mod tests {
             );
             let consumer = Consumer::new(committer, recorder, QosService::new(1), None);
 
-            let _ = consumer.process_and_record_transactions(&bank, &[sanitized_tx.clone()], 0);
+            let _ = consumer.process_and_record_transactions(&bank, &[sanitized_tx.clone()], 0, false);
 
             drop(consumer); // drop/disconnect transaction_status_sender
             transaction_status_service.join().unwrap();

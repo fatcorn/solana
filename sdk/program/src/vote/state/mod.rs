@@ -44,8 +44,10 @@ pub const VOTE_CREDITS_MAXIMUM_PER_SLOT: u8 = 8;
 #[frozen_abi(digest = "Ch2vVEwos2EjAVqSHCyJjnN2MNX1yrpapZTGhMSCjWUH")]
 #[derive(Serialize, Default, Deserialize, Debug, PartialEq, Eq, Clone, AbiExample)]
 pub struct Vote {
-    /// A stack of votes starting with the oldest vote
+    /// A stack of votes starting with the oldest vote with votes(virtual) slot
     pub slots: Vec<Slot>,
+    /// A stack of votes starting with the oldest vote with transaction(real) slot
+    // pub t_slots: Vec<Slot>,
     /// signature of the bank's state at the last slot
     pub hash: Hash,
     /// processing timestamp of last slot
@@ -56,6 +58,8 @@ impl Vote {
     pub fn new(slots: Vec<Slot>, hash: Hash) -> Self {
         Self {
             slots,
+            //v_slots: slots,
+            // t_slots: t_slots,
             hash,
             timestamp: None,
         }

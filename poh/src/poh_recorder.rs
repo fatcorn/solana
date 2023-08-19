@@ -96,6 +96,8 @@ pub struct Record {
     pub transactions: Vec<VersionedTransaction>,
     pub slot: Slot,
     pub sender: RecordResultSender,
+    // add by jesse
+    pub is_vote: bool,
 }
 impl Record {
     pub fn new(
@@ -103,12 +105,14 @@ impl Record {
         transactions: Vec<VersionedTransaction>,
         slot: Slot,
         sender: RecordResultSender,
+        is_vote: bool
     ) -> Self {
         Self {
             mixin,
             transactions,
             slot,
             sender,
+            is_vote
         }
     }
 }
@@ -161,6 +165,7 @@ impl TransactionRecorder {
         &self,
         bank_slot: Slot,
         transactions: Vec<VersionedTransaction>,
+        is_vote: bool
     ) -> RecordTransactionsSummary {
         let mut record_transactions_timings = RecordTransactionsTimings::default();
         let mut starting_transaction_index = None;
@@ -169,7 +174,7 @@ impl TransactionRecorder {
             let (hash, hash_us) = measure_us!(hash_transactions(&transactions));
             record_transactions_timings.hash_us = hash_us;
 
-            let (res, poh_record_us) = measure_us!(self.record(bank_slot, hash, transactions));
+            let (res, poh_record_us) = measure_us!(self.record(bank_slot, hash, transactions, is_vote));
             record_transactions_timings.poh_record_us = poh_record_us;
 
             match res {
@@ -207,12 +212,13 @@ impl TransactionRecorder {
         bank_slot: Slot,
         mixin: Hash,
         transactions: Vec<VersionedTransaction>,
+        is_vote: bool
     ) -> Result<Option<usize>> {
         // create a new channel so that there is only 1 sender and when it goes out of scope, the receiver fails
         let (result_sender, result_receiver) = unbounded();
         let res =
             self.record_sender
-                .send(Record::new(mixin, transactions, bank_slot, result_sender));
+                .send(Record::new(mixin, transactions, bank_slot, result_sender, is_vote));
         if res.is_err() {
             // If the channel is dropped, then the validator is shutting down so return that we are hitting
             //  the max tick height to stop transaction processing and flush any transactions in the pipeline.

@@ -1058,7 +1058,7 @@ mod tests {
                 system_transaction::transfer(&keypair2, &pubkey2, 1, genesis_config.hash()).into(),
             ];
 
-            let _ = recorder.record_transactions(bank.slot(), txs.clone());
+            let _ = recorder.record_transactions(bank.slot(), txs.clone(), false);
             let (_bank, (entry, _tick_height)) = entry_receiver.recv().unwrap();
             assert_eq!(entry.transactions, txs);
 
@@ -1066,7 +1066,7 @@ mod tests {
             // record_transactions should throw MaxHeightReached
             let next_slot = bank.slot() + 1;
             let RecordTransactionsSummary { result, .. } =
-                recorder.record_transactions(next_slot, txs);
+                recorder.record_transactions(next_slot, txs, false);
             assert_matches!(result, Err(PohRecorderError::MaxHeightReached));
             // Should receive nothing from PohRecorder b/c record failed
             assert!(entry_receiver.try_recv().is_err());
