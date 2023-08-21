@@ -92,7 +92,7 @@ fn bench_retransmitter(bencher: &mut Bencher) {
             let keypair1 = Keypair::new();
             let tx0 =
                 system_transaction::transfer(&keypair0, &keypair1.pubkey(), 1, Hash::default());
-            Entry::new(&Hash::default(), 1, vec![tx0])
+            Entry::new(&Hash::default(), 1, vec![tx0], false)
         })
         .collect();
 

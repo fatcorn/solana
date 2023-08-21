@@ -30,7 +30,7 @@ fn test_multi_fec_block_coding() {
     let keypair0 = Keypair::new();
     let keypair1 = Keypair::new();
     let tx0 = system_transaction::transfer(&keypair0, &keypair1.pubkey(), 1, Hash::default());
-    let entry = Entry::new(&Hash::default(), 1, vec![tx0]);
+    let entry = Entry::new(&Hash::default(), 1, vec![tx0], false);
     let num_entries = max_entries_per_n_shred(
         &entry,
         num_data_shreds as u64,
@@ -192,7 +192,7 @@ fn setup_different_sized_fec_blocks(
     let keypair0 = Keypair::new();
     let keypair1 = Keypair::new();
     let tx0 = system_transaction::transfer(&keypair0, &keypair1.pubkey(), 1, Hash::default());
-    let entry = Entry::new(&Hash::default(), 1, vec![tx0]);
+    let entry = Entry::new(&Hash::default(), 1, vec![tx0], false);
 
     // Make enough entries for `DATA_SHREDS_PER_FEC_BLOCK + 2` shreds so one
     // fec set will have `DATA_SHREDS_PER_FEC_BLOCK` shreds and the next
@@ -210,7 +210,7 @@ fn setup_different_sized_fec_blocks(
             let keypair1 = Keypair::new();
             let tx0 =
                 system_transaction::transfer(&keypair0, &keypair1.pubkey(), 1, Hash::default());
-            Entry::new(&Hash::default(), 1, vec![tx0])
+            Entry::new(&Hash::default(), 1, vec![tx0], false)
         })
         .collect();
 

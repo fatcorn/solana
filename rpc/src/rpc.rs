@@ -4551,7 +4551,7 @@ pub fn create_test_transaction_entries(
         blockhash,
     );
     signatures.push(success_tx.signatures[0]);
-    let entry_1 = solana_entry::entry::next_entry(&blockhash, 1, vec![success_tx]);
+    let entry_1 = solana_entry::entry::next_entry(&blockhash, 1, vec![success_tx], false);
     // Failed transaction, InstructionError
     let ix_error_tx = solana_sdk::system_transaction::transfer(
         keypair2,
@@ -4560,7 +4560,7 @@ pub fn create_test_transaction_entries(
         blockhash,
     );
     signatures.push(ix_error_tx.signatures[0]);
-    let entry_2 = solana_entry::entry::next_entry(&entry_1.hash, 1, vec![ix_error_tx]);
+    let entry_2 = solana_entry::entry::next_entry(&entry_1.hash, 1, vec![ix_error_tx], false);
     (vec![entry_1, entry_2], signatures)
 }
 

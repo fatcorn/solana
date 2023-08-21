@@ -4425,7 +4425,7 @@ pub(crate) mod tests {
             let hashes_per_tick = bank.hashes_per_tick().unwrap_or(0);
             assert!(hashes_per_tick > 0);
 
-            let too_few_hashes_tick = Entry::new(&blockhash, hashes_per_tick - 1, vec![]);
+            let too_few_hashes_tick = Entry::new(&blockhash, hashes_per_tick - 1, vec![], false);
             entries_to_test_shreds(
                 &[too_few_hashes_tick],
                 slot,

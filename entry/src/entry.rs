@@ -143,12 +143,16 @@ pub struct Entry {
     /// generated. They may have been observed before a previous Entry ID but were
     /// pushed back into this list to ensure deterministic interpretation of the ledger.
     pub transactions: Vec<VersionedTransaction>,
+    /// Is from vote record, add by jesse
+    pub is_vote: bool,
 }
 
 pub struct EntrySummary {
     pub num_hashes: u64,
     pub hash: Hash,
     pub num_transactions: u64,
+    /// Is from vote record, add by jesse
+    pub is_vote: bool,
 }
 
 impl From<&Entry> for EntrySummary {
@@ -157,6 +161,7 @@ impl From<&Entry> for EntrySummary {
             num_hashes: entry.num_hashes,
             hash: entry.hash,
             num_transactions: entry.transactions.len() as u64,
+            is_vote: entry.is_vote
         }
     }
 }
@@ -165,11 +170,12 @@ impl From<&Entry> for EntrySummary {
 pub enum EntryType {
     Transactions(Vec<SanitizedTransaction>),
     Tick(Hash),
+    Votes(Vec<SanitizedTransaction>)
 }
 
 impl Entry {
     /// Creates the next Entry `num_hashes` after `start_hash`.
-    pub fn new(prev_hash: &Hash, mut num_hashes: u64, transactions: Vec<Transaction>) -> Self {
+    pub fn new(prev_hash: &Hash, mut num_hashes: u64, transactions: Vec<Transaction>, is_vote: bool) -> Self {
         // If you passed in transactions, but passed in num_hashes == 0, then
         // next_hash will generate the next hash and set num_hashes == 1
         if num_hashes == 0 && !transactions.is_empty() {
@@ -182,6 +188,7 @@ impl Entry {
             num_hashes,
             hash,
             transactions,
+            is_vote
         }
     }
 
@@ -189,8 +196,9 @@ impl Entry {
         start_hash: &mut Hash,
         num_hashes: &mut u64,
         transactions: Vec<Transaction>,
+        is_vote: bool,
     ) -> Self {
-        let entry = Self::new(start_hash, *num_hashes, transactions);
+        let entry = Self::new(start_hash, *num_hashes, transactions, is_vote);
         *start_hash = entry.hash;
         *num_hashes = 0;
 
@@ -203,6 +211,7 @@ impl Entry {
             num_hashes,
             hash: *hash,
             transactions: vec![],
+            is_vote: false
         }
     }
 
@@ -519,6 +528,7 @@ fn start_verify_transactions_gpu(
         .filter_map(|entry_type| match entry_type {
             EntryType::Tick(_) => None,
             EntryType::Transactions(transactions) => Some(transactions),
+            EntryType::Votes(transactions) => Some(transactions)
         })
         .flatten()
         .collect::<Vec<_>>();
@@ -644,6 +654,7 @@ impl EntrySlice for [Entry] {
             num_hashes: 0,
             hash: *start_hash,
             transactions: vec![],
+            is_vote: false
         }];
         let entry_pairs = genesis.par_iter().chain(self).zip(self);
         let res = PAR_THREAD_POOL.install(|| {
@@ -679,6 +690,7 @@ impl EntrySlice for [Entry] {
             num_hashes: 0,
             hash: *start_hash,
             transactions: vec![],
+            is_vote: false,
         }];
 
         let aligned_len = ((self.len() + simd_len - 1) / simd_len) * simd_len;
@@ -790,6 +802,7 @@ impl EntrySlice for [Entry] {
             num_hashes: 0,
             hash: *start_hash,
             transactions: vec![],
+            is_vote: false
         }];
 
         let hashes: Vec<Hash> = genesis
@@ -897,14 +910,14 @@ impl EntrySlice for [Entry] {
     }
 }
 
-pub fn next_entry_mut(start: &mut Hash, num_hashes: u64, transactions: Vec<Transaction>) -> Entry {
-    let entry = Entry::new(start, num_hashes, transactions);
+pub fn next_entry_mut(start: &mut Hash, num_hashes: u64, transactions: Vec<Transaction>, is_vote: bool) -> Entry {
+    let entry = Entry::new(start, num_hashes, transactions, is_vote);
     *start = entry.hash;
     entry
 }
 
 pub fn create_ticks(num_ticks: u64, hashes_per_tick: u64, mut hash: Hash) -> Vec<Entry> {
-    repeat_with(|| next_entry_mut(&mut hash, hashes_per_tick, vec![]))
+    repeat_with(|| next_entry_mut(&mut hash, hashes_per_tick, vec![], false))
         .take(num_ticks as usize)
         .collect()
 }
@@ -912,16 +925,16 @@ pub fn create_ticks(num_ticks: u64, hashes_per_tick: u64, mut hash: Hash) -> Vec
 pub fn create_random_ticks(num_ticks: u64, max_hashes_per_tick: u64, mut hash: Hash) -> Vec<Entry> {
     repeat_with(|| {
         let hashes_per_tick = thread_rng().gen_range(1, max_hashes_per_tick);
-        next_entry_mut(&mut hash, hashes_per_tick, vec![])
+        next_entry_mut(&mut hash, hashes_per_tick, vec![], false)
     })
     .take(num_ticks as usize)
     .collect()
 }
 
 /// Creates the next Tick or Transaction Entry `num_hashes` after `start_hash`.
-pub fn next_entry(prev_hash: &Hash, num_hashes: u64, transactions: Vec<Transaction>) -> Entry {
+pub fn next_entry(prev_hash: &Hash, num_hashes: u64, transactions: Vec<Transaction>, is_vote: bool) -> Entry {
     let transactions = transactions.into_iter().map(Into::into).collect::<Vec<_>>();
-    next_versioned_entry(prev_hash, num_hashes, transactions)
+    next_versioned_entry(prev_hash, num_hashes, transactions, is_vote)
 }
 
 /// Creates the next Tick or Transaction Entry `num_hashes` after `start_hash`.
@@ -929,12 +942,14 @@ pub fn next_versioned_entry(
     prev_hash: &Hash,
     num_hashes: u64,
     transactions: Vec<VersionedTransaction>,
+    is_vote: bool
 ) -> Entry {
     assert!(num_hashes > 0 || transactions.is_empty());
     Entry {
         num_hashes,
         hash: next_hash(prev_hash, num_hashes, &transactions),
         transactions,
+        is_vote
     }
 }
 
@@ -960,8 +975,8 @@ mod tests {
         let one = hash(zero.as_ref());
         assert!(Entry::new_tick(0, &zero).verify(&zero)); // base case, never used
         assert!(!Entry::new_tick(0, &zero).verify(&one)); // base case, bad
-        assert!(next_entry(&zero, 1, vec![]).verify(&zero)); // inductive step
-        assert!(!next_entry(&zero, 1, vec![]).verify(&one)); // inductive step, bad
+        assert!(next_entry(&zero, 1, vec![], false).verify(&zero)); // inductive step
+        assert!(!next_entry(&zero, 1, vec![], false).verify(&one)); // inductive step, bad
     }
 
     fn test_verify_transactions(
@@ -1052,14 +1067,14 @@ mod tests {
         let entries_invalid = (0..1025)
             .map(|_| {
                 let transaction = test_invalid_tx();
-                next_entry_mut(&mut Hash::default(), 0, vec![transaction])
+                next_entry_mut(&mut Hash::default(), 0, vec![transaction], false)
             })
             .collect::<Vec<_>>();
 
         let entries_valid = (0..1025)
             .map(|_| {
                 let transaction = test_tx();
-                next_entry_mut(&mut Hash::default(), 0, vec![transaction])
+                next_entry_mut(&mut Hash::default(), 0, vec![transaction], false)
             })
             .collect::<Vec<_>>();
 
@@ -1085,7 +1100,7 @@ mod tests {
         let keypair = Keypair::new();
         let tx0 = system_transaction::transfer(&keypair, &keypair.pubkey(), 0, zero);
         let tx1 = system_transaction::transfer(&keypair, &keypair.pubkey(), 1, zero);
-        let mut e0 = Entry::new(&zero, 0, vec![tx0.clone(), tx1.clone()]);
+        let mut e0 = Entry::new(&zero, 0, vec![tx0.clone(), tx1.clone()], false);
         assert!(e0.verify(&zero));
 
         // Next, swap two transactions and ensure verification fails.
@@ -1104,7 +1119,7 @@ mod tests {
         let tx1 = system_transaction::transfer(&keypair, &keypair.pubkey(), 1, zero);
 
         // Verify entry with 2 transactions
-        let mut e0 = vec![Entry::new(&zero, 0, vec![tx0, tx1])];
+        let mut e0 = vec![Entry::new(&zero, 0, vec![tx0, tx1], false)];
         assert!(e0.verify(&zero));
 
         // Clear signature of the first transaction, see that it does not verify
@@ -1124,24 +1139,24 @@ mod tests {
         assert!(!e0.verify(&zero));
 
         // Pass an entry with no transactions
-        let e0 = vec![Entry::new(&zero, 0, vec![])];
+        let e0 = vec![Entry::new(&zero, 0, vec![], false)];
         assert!(e0.verify(&zero));
     }
 
     #[test]
     fn test_next_entry() {
         let zero = Hash::default();
-        let tick = next_entry(&zero, 1, vec![]);
+        let tick = next_entry(&zero, 1, vec![], false);
         assert_eq!(tick.num_hashes, 1);
         assert_ne!(tick.hash, zero);
 
-        let tick = next_entry(&zero, 0, vec![]);
+        let tick = next_entry(&zero, 0, vec![], false);
         assert_eq!(tick.num_hashes, 0);
         assert_eq!(tick.hash, zero);
 
         let keypair = Keypair::new();
         let tx0 = system_transaction::transfer(&keypair, &Pubkey::new_unique(), 42, zero);
-        let entry0 = next_entry(&zero, 1, vec![tx0.clone()]);
+        let entry0 = next_entry(&zero, 1, vec![tx0.clone()], false);
         assert_eq!(entry0.num_hashes, 1);
         assert_eq!(entry0.hash, next_hash(&zero, 1, &[tx0.into()]));
     }
@@ -1152,7 +1167,7 @@ mod tests {
         let zero = Hash::default();
         let keypair = Keypair::new();
         let tx = system_transaction::transfer(&keypair, &keypair.pubkey(), 0, zero);
-        next_entry(&zero, 0, vec![tx]);
+        next_entry(&zero, 0, vec![tx], false);
     }
 
     #[test]
@@ -1163,9 +1178,9 @@ mod tests {
         assert!(vec![][..].verify(&zero)); // base case
         assert!(vec![Entry::new_tick(0, &zero)][..].verify(&zero)); // singleton case 1
         assert!(!vec![Entry::new_tick(0, &zero)][..].verify(&one)); // singleton case 2, bad
-        assert!(vec![next_entry(&zero, 0, vec![]); 2][..].verify(&zero)); // inductive step
+        assert!(vec![next_entry(&zero, 0, vec![], false); 2][..].verify(&zero)); // inductive step
 
-        let mut bad_ticks = vec![next_entry(&zero, 0, vec![]); 2];
+        let mut bad_ticks = vec![next_entry(&zero, 0, vec![], false); 2];
         bad_ticks[1].hash = one;
         assert!(!bad_ticks.verify(&zero)); // inductive step, bad
     }
@@ -1180,12 +1195,12 @@ mod tests {
         assert!(vec![Entry::new_tick(1, &two)][..].verify(&one)); // singleton case 1
         assert!(!vec![Entry::new_tick(1, &two)][..].verify(&two)); // singleton case 2, bad
 
-        let mut ticks = vec![next_entry(&one, 1, vec![])];
-        ticks.push(next_entry(&ticks.last().unwrap().hash, 1, vec![]));
+        let mut ticks = vec![next_entry(&one, 1, vec![], false)];
+        ticks.push(next_entry(&ticks.last().unwrap().hash, 1, vec![], false));
         assert!(ticks.verify(&one)); // inductive step
 
-        let mut bad_ticks = vec![next_entry(&one, 1, vec![])];
-        bad_ticks.push(next_entry(&bad_ticks.last().unwrap().hash, 1, vec![]));
+        let mut bad_ticks = vec![next_entry(&one, 1, vec![], false)];
+        bad_ticks.push(next_entry(&bad_ticks.last().unwrap().hash, 1, vec![], false));
         bad_ticks[1].hash = one;
         assert!(!bad_ticks.verify(&one)); // inductive step, bad
     }
@@ -1201,19 +1216,20 @@ mod tests {
         let tx0 = system_transaction::transfer(&alice_keypair, &bob_keypair.pubkey(), 1, one);
         let tx1 = system_transaction::transfer(&bob_keypair, &alice_keypair.pubkey(), 1, one);
         assert!(vec![][..].verify(&one)); // base case
-        assert!(vec![next_entry(&one, 1, vec![tx0.clone()])][..].verify(&one)); // singleton case 1
-        assert!(!vec![next_entry(&one, 1, vec![tx0.clone()])][..].verify(&two)); // singleton case 2, bad
+        assert!(vec![next_entry(&one, 1, vec![tx0.clone()], false)][..].verify(&one)); // singleton case 1
+        assert!(!vec![next_entry(&one, 1, vec![tx0.clone()], false)][..].verify(&two)); // singleton case 2, bad
 
-        let mut ticks = vec![next_entry(&one, 1, vec![tx0.clone()])];
+        let mut ticks = vec![next_entry(&one, 1, vec![tx0.clone()], false)];
         ticks.push(next_entry(
             &ticks.last().unwrap().hash,
             1,
             vec![tx1.clone()],
+            false,
         ));
         assert!(ticks.verify(&one)); // inductive step
 
-        let mut bad_ticks = vec![next_entry(&one, 1, vec![tx0])];
-        bad_ticks.push(next_entry(&bad_ticks.last().unwrap().hash, 1, vec![tx1]));
+        let mut bad_ticks = vec![next_entry(&one, 1, vec![tx0], false)];
+        bad_ticks.push(next_entry(&bad_ticks.last().unwrap().hash, 1, vec![tx1], false));
         bad_ticks[1].hash = one;
         assert!(!bad_ticks.verify(&one)); // inductive step, bad
     }

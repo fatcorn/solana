@@ -74,7 +74,7 @@ impl BroadcastRun for BroadcastFakeShredsRun {
         }
 
         let fake_entries: Vec<_> = (0..num_entries)
-            .map(|_| Entry::new(&self.last_blockhash, 0, vec![]))
+            .map(|_| Entry::new(&self.last_blockhash, 0, vec![], false))
             .collect();
 
         let (fake_data_shreds, fake_coding_shreds) = shredder.entries_to_shreds(

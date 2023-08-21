@@ -570,6 +570,10 @@ fn process_entries(
                     }
                 }
             }
+
+            EntryType::Votes(transactions) => {
+                // todo
+            }
         }
     }
     execute_batches(
@@ -2068,7 +2072,7 @@ pub mod tests {
         let trailing_entry = {
             let keypair = Keypair::new();
             let tx = system_transaction::transfer(&mint_keypair, &keypair.pubkey(), 1, blockhash);
-            next_entry(&blockhash, 1, vec![tx])
+            next_entry(&blockhash, 1, vec![tx], false)
         };
         entries.push(trailing_entry);
 
@@ -2644,7 +2648,7 @@ pub mod tests {
             // Transfer one token from the mint to a random account
             let keypair = Keypair::new();
             let tx = system_transaction::transfer(&mint_keypair, &keypair.pubkey(), 1, blockhash);
-            let entry = next_entry_mut(&mut last_entry_hash, 1, vec![tx]);
+            let entry = next_entry_mut(&mut last_entry_hash, 1, vec![tx], false);
             entries.push(entry);
 
             // Add a second Transaction that will produce a
@@ -2652,12 +2656,12 @@ pub mod tests {
             let keypair2 = Keypair::new();
             let tx =
                 system_transaction::transfer(&mint_keypair, &keypair2.pubkey(), 101, blockhash);
-            let entry = next_entry_mut(&mut last_entry_hash, 1, vec![tx]);
+            let entry = next_entry_mut(&mut last_entry_hash, 1, vec![tx], false);
             entries.push(entry);
         }
 
         let remaining_hashes = hashes_per_tick - entries.len() as u64;
-        let tick_entry = next_entry_mut(&mut last_entry_hash, remaining_hashes, vec![]);
+        let tick_entry = next_entry_mut(&mut last_entry_hash, remaining_hashes, vec![], false);
         entries.push(tick_entry);
 
         // Fill up the rest of slot 1 with ticks
@@ -2750,7 +2754,7 @@ pub mod tests {
 
         // ensure bank can process a tick
         assert_eq!(bank.tick_height(), 0);
-        let tick = next_entry(&genesis_config.hash(), 1, vec![]);
+        let tick = next_entry(&genesis_config.hash(), 1, vec![], false);
         assert_eq!(
             process_entries_for_tests(&bank, vec![tick], true, None, None),
             Ok(())
@@ -2778,14 +2782,14 @@ pub mod tests {
             2,
             bank.last_blockhash(),
         );
-        let entry_1 = next_entry(&blockhash, 1, vec![tx]);
+        let entry_1 = next_entry(&blockhash, 1, vec![tx], false);
         let tx = system_transaction::transfer(
             &mint_keypair,
             &keypair2.pubkey(),
             2,
             bank.last_blockhash(),
         );
-        let entry_2 = next_entry(&entry_1.hash, 1, vec![tx]);
+        let entry_2 = next_entry(&entry_1.hash, 1, vec![tx], false);
         assert_eq!(
             process_entries_for_tests(&bank, vec![entry_1, entry_2], true, None, None),
             Ok(())
@@ -2821,6 +2825,7 @@ pub mod tests {
                 1,
                 bank.last_blockhash(),
             )],
+            false,
         );
 
         let entry_2_to_3_mint_to_1 = next_entry(
@@ -2840,6 +2845,7 @@ pub mod tests {
                     bank.last_blockhash(),
                 ), // will collide
             ],
+            false
         );
 
         assert_eq!(
@@ -2894,6 +2900,7 @@ pub mod tests {
                     Hash::default(), // Should cause a transaction failure with BlockhashNotFound
                 ),
             ],
+            false,
         );
 
         let entry_2_to_3_mint_to_1 = next_entry(
@@ -2913,6 +2920,7 @@ pub mod tests {
                     bank.last_blockhash(),
                 ), // will collide
             ],
+            false,
         );
 
         assert!(process_entries_for_tests(
@@ -3032,7 +3040,7 @@ pub mod tests {
             bank.last_blockhash(),
         );
 
-        let entry = next_entry(&bank.last_blockhash(), 1, vec![tx]);
+        let entry = next_entry(&bank.last_blockhash(), 1, vec![tx], false);
         let bank = Arc::new(bank);
         let result = process_entries_for_tests(&bank, vec![entry], false, None, None);
         bank.freeze();
@@ -3073,7 +3081,7 @@ pub mod tests {
                 bank.last_blockhash(),
             );
 
-            let entry = next_entry(&bank.last_blockhash(), 1, vec![tx]);
+            let entry = next_entry(&bank.last_blockhash(), 1, vec![tx], false);
             let bank = Arc::new(bank);
             let _result = process_entries_for_tests(&bank, vec![entry], false, None, None);
             bank.freeze();
@@ -3115,6 +3123,7 @@ pub mod tests {
                 1,
                 bank.last_blockhash(),
             )],
+            false,
         );
         // should now be:
         // keypair1=4
@@ -3138,6 +3147,7 @@ pub mod tests {
                     bank.last_blockhash(),
                 ), // will collide with predecessor
             ],
+            false,
         );
         // should now be:
         // keypair1=2
@@ -3161,6 +3171,7 @@ pub mod tests {
                     bank.last_blockhash(),
                 ), // should be fine
             ],
+            false
         );
         // would now be:
         // keypair1=0
@@ -3219,10 +3230,10 @@ pub mod tests {
         let blockhash = bank.last_blockhash();
         let tx =
             system_transaction::transfer(&keypair1, &keypair3.pubkey(), 1, bank.last_blockhash());
-        let entry_1 = next_entry(&blockhash, 1, vec![tx]);
+        let entry_1 = next_entry(&blockhash, 1, vec![tx], false);
         let tx =
             system_transaction::transfer(&keypair2, &keypair4.pubkey(), 1, bank.last_blockhash());
-        let entry_2 = next_entry(&entry_1.hash, 1, vec![tx]);
+        let entry_2 = next_entry(&entry_1.hash, 1, vec![tx], false);
         assert_eq!(
             process_entries_for_tests(&bank, vec![entry_1, entry_2], true, None, None),
             Ok(())
@@ -3281,7 +3292,7 @@ pub mod tests {
                     &solana_sdk::pubkey::new_rand(),
                 ));
 
-                next_entry_mut(&mut hash, 0, transactions)
+                next_entry_mut(&mut hash, 0, transactions, false)
             })
             .collect();
         assert_eq!(
@@ -3346,7 +3357,7 @@ pub mod tests {
         }
 
         // Transfer lamports to each other
-        let entry = next_entry(&bank.last_blockhash(), 1, tx_vector);
+        let entry = next_entry(&bank.last_blockhash(), 1, tx_vector, false);
         assert_eq!(
             process_entries_for_tests(&bank, vec![entry], true, None, None),
             Ok(())
@@ -3402,11 +3413,11 @@ pub mod tests {
 
         // ensure bank can process 2 entries that do not have a common account and tick is registered
         let tx = system_transaction::transfer(&keypair2, &keypair3.pubkey(), 1, blockhash);
-        let entry_1 = next_entry(&blockhash, 1, vec![tx]);
-        let tick = next_entry(&entry_1.hash, 1, vec![]);
+        let entry_1 = next_entry(&blockhash, 1, vec![tx], false);
+        let tick = next_entry(&entry_1.hash, 1, vec![], false);
         let tx =
             system_transaction::transfer(&keypair1, &keypair4.pubkey(), 1, bank.last_blockhash());
-        let entry_2 = next_entry(&tick.hash, 1, vec![tx]);
+        let entry_2 = next_entry(&tick.hash, 1, vec![tx], false);
         assert_eq!(
             process_entries_for_tests(
                 &bank,
@@ -3423,7 +3434,7 @@ pub mod tests {
         // ensure that an error is returned for an empty account (keypair2)
         let tx =
             system_transaction::transfer(&keypair2, &keypair3.pubkey(), 1, bank.last_blockhash());
-        let entry_3 = next_entry(&entry_2.hash, 1, vec![tx]);
+        let entry_3 = next_entry(&entry_2.hash, 1, vec![tx], false);
         assert_eq!(
             process_entries_for_tests(&bank, vec![entry_3], true, None, None),
             Err(TransactionError::AccountNotFound)
@@ -3502,6 +3513,7 @@ pub mod tests {
                 success_tx,
                 fail_tx.clone(), // will collide
             ],
+            false,
         );
 
         assert_eq!(
@@ -3703,7 +3715,7 @@ pub mod tests {
                             &solana_sdk::pubkey::new_rand(),
                         ));
                         transactions
-                    })
+                    }, false)
                 })
                 .collect();
             info!("paying iteration {}", i);
@@ -3725,7 +3737,7 @@ pub mod tests {
                                 )
                             })
                             .collect::<Vec<_>>(),
-                    )
+                        false)
                 })
                 .collect();
 
@@ -3736,7 +3748,7 @@ pub mod tests {
             process_entries_for_tests(
                 &bank,
                 (0..bank.ticks_per_slot())
-                    .map(|_| next_entry_mut(&mut hash, 1, vec![]))
+                    .map(|_| next_entry_mut(&mut hash, 1, vec![], false))
                     .collect::<Vec<_>>(),
                 true,
                 None,
@@ -3780,7 +3792,7 @@ pub mod tests {
         // be able to find the blockhash if we process transactions all in the same
         // batch
         let tx = system_transaction::transfer(&mint_keypair, &keypair.pubkey(), 1, new_blockhash);
-        let entry = next_entry(&new_blockhash, 1, vec![tx]);
+        let entry = next_entry(&new_blockhash, 1, vec![tx], false);
         entries.push(entry);
 
         process_entries_for_tests(&bank0, entries, true, None, None).unwrap();
@@ -3947,7 +3959,7 @@ pub mod tests {
                 }
             })
             .collect();
-        let entry = next_entry(&bank_1_blockhash, 1, vote_txs);
+        let entry = next_entry(&bank_1_blockhash, 1, vote_txs, false);
         let (replay_vote_sender, replay_vote_receiver) = crossbeam_channel::unbounded();
         let _ =
             process_entries_for_tests(&bank1, vec![entry], true, None, Some(&replay_vote_sender));
@@ -3968,7 +3980,7 @@ pub mod tests {
         slot_leader_keypair: &Arc<Keypair>,
     ) {
         // Add votes to `last_slot` so that `root` will be confirmed
-        let vote_entry = next_entry(parent_blockhash, 1, vec![vote_tx]);
+        let vote_entry = next_entry(parent_blockhash, 1, vec![vote_tx], false);
         let mut entries = create_ticks(ticks_per_slot, 0, vote_entry.hash);
         entries.insert(0, vote_entry);
         blockstore
@@ -4292,7 +4304,7 @@ pub mod tests {
             amount,
             bank.last_blockhash(),
         );
-        let entry = next_entry(&blockhash, 1, vec![tx1, tx2]);
+        let entry = next_entry(&blockhash, 1, vec![tx1, tx2], false);
         let new_hash = entry.hash;
 
         confirm_slot_entries(
@@ -4339,7 +4351,7 @@ pub mod tests {
             amount,
             bank.last_blockhash(),
         );
-        let entry = next_entry(&new_hash, 1, vec![tx1, tx2, tx3]);
+        let entry = next_entry(&new_hash, 1, vec![tx1, tx2, tx3], false);
 
         confirm_slot_entries(
             &bank,
@@ -4511,17 +4523,19 @@ pub mod tests {
                 let tx =
                     system_transaction::transfer(&mint_keypair, &to_pubkey, 1, recent_blockhash);
                 remaining_entry_hashes = remaining_entry_hashes.checked_sub(1).unwrap();
-                let mut entries = vec![next_entry_mut(&mut prev_entry_hash, 1, vec![tx])];
+                let mut entries = vec![next_entry_mut(&mut prev_entry_hash, 1, vec![tx],false), false];
 
                 entries.push(next_entry_mut(
                     &mut prev_entry_hash,
                     remaining_entry_hashes,
                     vec![],
+                    false,
                 ));
                 entries.push(next_entry_mut(
                     &mut prev_entry_hash,
                     HASHES_PER_TICK,
                     vec![],
+                    false,
                 ));
 
                 entries

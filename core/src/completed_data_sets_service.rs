@@ -119,7 +119,7 @@ pub mod test {
     #[test]
     fn test_zero_signatures() {
         let tx = Transaction::new_with_payer(&[], None);
-        let entries = vec![Entry::new(&Hash::default(), 1, vec![tx])];
+        let entries = vec![Entry::new(&Hash::default(), 1, vec![tx], false)];
         let signatures = CompletedDataSetsService::get_transaction_signatures(entries);
         assert!(signatures.is_empty());
     }
@@ -129,13 +129,13 @@ pub mod test {
         let kp = Keypair::new();
         let tx =
             Transaction::new_signed_with_payer(&[], Some(&kp.pubkey()), &[&kp], Hash::default());
-        let entries = vec![Entry::new(&Hash::default(), 1, vec![tx.clone()])];
+        let entries = vec![Entry::new(&Hash::default(), 1, vec![tx.clone()], false)];
         let signatures = CompletedDataSetsService::get_transaction_signatures(entries);
         assert_eq!(signatures.len(), 1);
 
         let entries = vec![
-            Entry::new(&Hash::default(), 1, vec![tx.clone(), tx.clone()]),
-            Entry::new(&Hash::default(), 1, vec![tx]),
+            Entry::new(&Hash::default(), 1, vec![tx.clone(), tx.clone()], false),
+            Entry::new(&Hash::default(), 1, vec![tx], false),
         ];
         let signatures = CompletedDataSetsService::get_transaction_signatures(entries);
         assert_eq!(signatures.len(), 3);

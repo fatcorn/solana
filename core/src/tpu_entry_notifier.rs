@@ -73,6 +73,7 @@ impl TpuEntryNotifier {
             num_hashes: entry.num_hashes,
             hash: entry.hash,
             num_transactions: entry.transactions.len() as u64,
+            is_vote: entry.is_vote
         };
         if let Err(err) = entry_notification_sender.send(EntryNotification {
             slot,

@@ -514,7 +514,7 @@ mod tests {
                 let keypair1 = Keypair::new();
                 let tx0 =
                     system_transaction::transfer(&keypair0, &keypair1.pubkey(), 1, Hash::default());
-                Entry::new(&Hash::default(), 1, vec![tx0])
+                Entry::new(&Hash::default(), 1, vec![tx0], false)
             })
             .collect();
 
@@ -600,7 +600,7 @@ mod tests {
                 let keypair1 = Keypair::new();
                 let tx0 =
                     system_transaction::transfer(&keypair0, &keypair1.pubkey(), 1, Hash::default());
-                Entry::new(&Hash::default(), 1, vec![tx0])
+                Entry::new(&Hash::default(), 1, vec![tx0], false)
             })
             .collect();
 
@@ -632,7 +632,7 @@ mod tests {
                 let keypair1 = Keypair::new();
                 let tx0 =
                     system_transaction::transfer(&keypair0, &keypair1.pubkey(), 1, Hash::default());
-                Entry::new(&Hash::default(), 1, vec![tx0])
+                Entry::new(&Hash::default(), 1, vec![tx0], false)
             })
             .collect();
 
@@ -669,7 +669,7 @@ mod tests {
                 let keypair1 = Keypair::new();
                 let tx0 =
                     system_transaction::transfer(&keypair0, &keypair1.pubkey(), 1, Hash::default());
-                Entry::new(&Hash::default(), 1, vec![tx0])
+                Entry::new(&Hash::default(), 1, vec![tx0], false)
             })
             .collect();
 
@@ -715,7 +715,7 @@ mod tests {
                 let keypair1 = Keypair::new();
                 let tx0 =
                     system_transaction::transfer(&keypair0, &keypair1.pubkey(), 1, Hash::default());
-                Entry::new(&Hash::default(), 1, vec![tx0])
+                Entry::new(&Hash::default(), 1, vec![tx0], false)
             })
             .collect();
 
@@ -758,7 +758,7 @@ mod tests {
         let keypair0 = Keypair::new();
         let keypair1 = Keypair::new();
         let tx0 = system_transaction::transfer(&keypair0, &keypair1.pubkey(), 1, Hash::default());
-        let entry = Entry::new(&Hash::default(), 1, vec![tx0]);
+        let entry = Entry::new(&Hash::default(), 1, vec![tx0], false);
 
         let num_data_shreds: usize = 5;
         let data_buffer_size = ShredData::capacity(/*merkle_proof_size:*/ None).unwrap();
@@ -770,7 +770,7 @@ mod tests {
                 let keypair1 = Keypair::new();
                 let tx0 =
                     system_transaction::transfer(&keypair0, &keypair1.pubkey(), 1, Hash::default());
-                Entry::new(&Hash::default(), 1, vec![tx0])
+                Entry::new(&Hash::default(), 1, vec![tx0], false)
             })
             .collect();
 
@@ -997,6 +997,7 @@ mod tests {
             &hash::new_rand(&mut rng), // prev hash
             rng.gen_range(1, 64),      // num hashes
             txs,
+            false,
         );
         let keypair = Arc::new(Keypair::new());
         let slot = 71489660;
@@ -1067,7 +1068,7 @@ mod tests {
                 let keypair1 = Keypair::new();
                 let tx0 =
                     system_transaction::transfer(&keypair0, &keypair1.pubkey(), 1, Hash::default());
-                Entry::new(&Hash::default(), 1, vec![tx0])
+                Entry::new(&Hash::default(), 1, vec![tx0], false)
             })
             .collect();
 
@@ -1100,7 +1101,7 @@ mod tests {
                 let keypair1 = Keypair::new();
                 let tx0 =
                     system_transaction::transfer(&keypair0, &keypair1.pubkey(), 1, Hash::default());
-                Entry::new(&Hash::default(), 1, vec![tx0])
+                Entry::new(&Hash::default(), 1, vec![tx0], false)
             })
             .collect();
 
@@ -1158,7 +1159,7 @@ mod tests {
                 let keypair1 = Keypair::new();
                 let tx0 =
                     system_transaction::transfer(&keypair0, &keypair1.pubkey(), 1, Hash::default());
-                Entry::new(&Hash::default(), 1, vec![tx0])
+                Entry::new(&Hash::default(), 1, vec![tx0], false)
             })
             .collect();
 

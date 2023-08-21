@@ -196,6 +196,7 @@ impl PohService {
                     record.slot,
                     record.mixin,
                     record.transactions,
+                    record.is_vote
                 ))
                 .is_err()
             {
@@ -259,6 +260,7 @@ impl PohService {
                         record.slot,
                         record.mixin,
                         std::mem::take(&mut record.transactions),
+                        record.is_vote
                     );
                     // what do we do on failure here? Ignore for now.
                     let (_send_res, send_record_result_time) =
@@ -464,6 +466,7 @@ mod tests {
                                 bank_slot,
                                 h1,
                                 vec![tx.clone()],
+                                false
                             );
                             time.stop();
                             total_us += time.as_us();

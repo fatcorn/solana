@@ -136,7 +136,7 @@ impl BroadcastRun for BroadcastDuplicatesRun {
                         1,
                         self.recent_blockhash.unwrap(),
                     );
-                    let new_extra_entry = Entry::new(&prev_entry_hash, 1, vec![extra_tx]);
+                    let new_extra_entry = Entry::new(&prev_entry_hash, 1, vec![extra_tx], false);
 
                     // This will only work with sleepy tick producer where the hashing
                     // checks in replay are turned off, because we're introducing an extra
@@ -145,6 +145,7 @@ impl BroadcastRun for BroadcastDuplicatesRun {
                         &new_extra_entry.hash,
                         original_last_entry.num_hashes,
                         vec![],
+                        false
                     );
 
                     Some((original_last_entry, vec![new_extra_entry, new_last_entry]))

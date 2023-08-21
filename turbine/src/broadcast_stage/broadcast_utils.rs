@@ -136,7 +136,7 @@ mod tests {
         assert!(bank1.max_tick_height() > 1);
         let entries: Vec<_> = (1..bank1.max_tick_height() + 1)
             .map(|i| {
-                let entry = Entry::new(&last_hash, 1, vec![tx.clone()]);
+                let entry = Entry::new(&last_hash, 1, vec![tx.clone()], false);
                 last_hash = entry.hash;
                 s.send((bank1.clone(), (entry.clone(), i))).unwrap();
                 entry
@@ -168,7 +168,7 @@ mod tests {
         let expected_last_height = bank1.max_tick_height();
         let last_entry = (1..=bank1.max_tick_height())
             .map(|tick_height| {
-                let entry = Entry::new(&last_hash, 1, vec![tx.clone()]);
+                let entry = Entry::new(&last_hash, 1, vec![tx.clone()], false);
                 last_hash = entry.hash;
                 // Interrupt slot 1 right before the last tick
                 if tick_height == expected_last_height {
