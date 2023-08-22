@@ -509,6 +509,8 @@ impl PartialEq for Bank {
             hash,
             parent_hash,
             parent_slot,
+            t_parent_hash,
+            t_parent_slot,
             hard_forks,
             transaction_count,
             non_vote_transaction_count_since_restart: _,
@@ -525,9 +527,12 @@ impl PartialEq for Bank {
             genesis_creation_time,
             slots_per_year,
             slot,
+            t_slot,
+            t_hash,
             bank_id: _,
             epoch,
             block_height,
+            t_block_height,
             collector_id,
             collector_fees,
             fee_rate_governor,
@@ -595,6 +600,11 @@ impl PartialEq for Bank {
             && *stakes_cache.stakes() == *other.stakes_cache.stakes()
             && epoch_stakes == &other.epoch_stakes
             && is_delta.load(Relaxed) == other.is_delta.load(Relaxed)
+            && t_block_height == &other.t_block_height
+            && t_parent_slot == &other.t_parent_slot
+            && t_parent_hash == &other.t_parent_hash
+            && t_slot == &other.t_slot
+            && *t_hash.read().unwrap() == *other.t_hash.read().unwrap()
     }
 }
 
@@ -670,11 +680,20 @@ pub struct Bank {
     /// Hash of this Bank's state. Only meaningful after freezing.
     hash: RwLock<Hash>,
 
+    /// Hash of this Bank's truly slot state. Only meaningful after freezing.
+    t_hash: RwLock<Hash>,
+
     /// Hash of this Bank's parent's state
     parent_hash: Hash,
 
     /// parent's slot
     parent_slot: Slot,
+
+    /// Hash of this Bank's tx chain parent's state
+    t_parent_hash: Hash,
+
+    /// Tx chain parent's slot
+    t_parent_slot: Slot,
 
     /// slots to hard fork at
     hard_forks: Arc<RwLock<HardForks>>,
@@ -726,6 +745,9 @@ pub struct Bank {
     /// Bank slot (i.e. block)
     slot: Slot,
 
+    /// Bank tx slot (i.e. block)
+    t_slot: Slot,
+
     bank_id: BankId,
 
     /// Bank epoch
@@ -733,6 +755,9 @@ pub struct Bank {
 
     /// Bank block_height
     block_height: u64,
+
+    /// Bank tx block_height
+    t_block_height: u64,
 
     /// The pubkey to send transactions fees to.
     collector_id: Pubkey,
@@ -1010,8 +1035,11 @@ impl Bank {
             blockhash_queue: RwLock::<BlockhashQueue>::default(),
             ancestors: Ancestors::default(),
             hash: RwLock::<Hash>::default(),
+            t_hash: Default::default(),
             parent_hash: Hash::default(),
             parent_slot: Slot::default(),
+            t_parent_hash: Default::default(),
+            t_parent_slot: Slot::default(),
             hard_forks: Arc::<RwLock<HardForks>>::default(),
             transaction_count: AtomicU64::default(),
             non_vote_transaction_count_since_restart: AtomicU64::default(),
@@ -1028,9 +1056,11 @@ impl Bank {
             genesis_creation_time: UnixTimestamp::default(),
             slots_per_year: f64::default(),
             slot: Slot::default(),
+            t_slot: Slot::default(),
             bank_id: BankId::default(),
             epoch: Epoch::default(),
             block_height: u64::default(),
+            t_block_height: u64::default(),
             collector_id: Pubkey::default(),
             collector_fees: AtomicU64::default(),
             fee_rate_governor: FeeRateGovernor::default(),
@@ -1342,6 +1372,16 @@ impl Bank {
             bank_id,
             epoch,
             blockhash_queue,
+
+            // For split poh consensus
+            t_parent_slot: parent.t_slot,
+            t_parent_hash: parent.t_hash(),
+            t_hash: RwLock::new(Hash::default()),
+            // todo, wait for func input, add by jesse
+            t_slot: 0,
+            t_block_height: parent.t_block_height + 1,
+
+
 
             // TODO: clean this up, so much special-case copying...
             hashes_per_tick: parent.hashes_per_tick,
@@ -1853,6 +1893,16 @@ impl Bank {
             loaded_programs_cache: Arc::<RwLock<LoadedPrograms>>::default(),
             check_program_modification_slot: false,
             epoch_reward_status: EpochRewardStatus::default(),
+
+            // todo data from fields
+            t_hash : RwLock::new(Hash::default()),
+
+            t_slot: Slot::default(),
+            t_parent_hash: Hash::default(),
+            t_parent_slot: Slot::default(),
+            t_block_height: Slot::default(),
+
+
         };
         bank.finish_init(
             genesis_config,
@@ -1961,6 +2011,10 @@ impl Bank {
         self.slot
     }
 
+    pub fn t_slot(&self) -> Slot {
+        self.t_slot
+    }
+
     pub fn bank_id(&self) -> BankId {
         self.bank_id
     }
@@ -1979,6 +2033,10 @@ impl Bank {
 
     pub fn hash(&self) -> Hash {
         *self.hash.read().unwrap()
+    }
+
+    pub fn t_hash(&self) -> Hash {
+        *self.t_hash.read().unwrap()
     }
 
     pub fn is_frozen(&self) -> bool {
@@ -3803,6 +3861,10 @@ impl Bank {
 
     pub fn parent_slot(&self) -> Slot {
         self.parent_slot
+    }
+
+    pub fn t_parent_slot(&self) -> Slot {
+        self.t_parent_slot
     }
 
     pub fn parent_hash(&self) -> Hash {

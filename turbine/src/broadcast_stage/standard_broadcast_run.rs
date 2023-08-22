@@ -29,6 +29,7 @@ pub struct StandardBroadcastRun {
     insert_shreds_stats: Arc<Mutex<SlotBroadcastStats<InsertShredsStats>>>,
     unfinished_slot: Option<UnfinishedSlotInfo>,
     current_slot_and_parent: Option<(u64, u64)>,
+    t_current_slot_and_parent: Option<(u64, u64)>,
     slot_broadcast_start: Option<Instant>,
     shred_version: u16,
     last_datapoint_submit: Arc<AtomicInterval>,
@@ -54,6 +55,7 @@ impl StandardBroadcastRun {
             insert_shreds_stats: Arc::default(),
             unfinished_slot: None,
             current_slot_and_parent: None,
+            t_current_slot_and_parent: None,
             slot_broadcast_start: None,
             shred_version,
             last_datapoint_submit: Arc::default(),
@@ -232,8 +234,24 @@ impl StandardBroadcastRun {
             let parent_slot = bank.parent_slot();
 
             self.current_slot_and_parent = Some((slot, parent_slot));
+
             receive_elapsed = Duration::new(0, 0);
             coalesce_elapsed = Duration::new(0, 0);
+        }
+
+        // Truly slot in standard broadcast, add by jesse
+        if self.t_current_slot_and_parent.is_none()
+            || bank.t_slot() != self.t_current_slot_and_parent.unwrap().0
+        {
+            // self.slot_broadcast_start = Some(Instant::now());
+            // self.num_batches = 0;
+            let t_slot = bank.t_slot();
+            let t_parent_slot = bank.t_parent_slot();
+
+            self.t_current_slot_and_parent = Some((t_slot, t_parent_slot));
+
+            // receive_elapsed = Duration::new(0, 0);
+            // coalesce_elapsed = Duration::new(0, 0);
         }
 
         let mut process_stats = ProcessShredsStats::default();

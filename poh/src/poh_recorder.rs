@@ -789,6 +789,7 @@ impl PohRecorder {
                     num_hashes: poh_entry.num_hashes,
                     hash: poh_entry.hash,
                     transactions: vec![],
+                    // Todo, for now, we put tick entries to truly slot block store, soon we maybe move it to virtual slot, and it's ok, add by jesse
                     is_vote: false
                 },
                 self.tick_height,

@@ -4362,6 +4362,7 @@ pub(crate) mod tests {
                         blockhash,
                     ), // should cause AccountNotFound error
                 ],
+                false
             );
             entries_to_test_shreds(
                 &[entry],
@@ -4399,6 +4400,7 @@ pub(crate) mod tests {
                     2,
                     blockhash,
                 )],
+                false
             );
             entries_to_test_shreds(
                 &[entry],
@@ -4523,7 +4525,7 @@ pub(crate) mod tests {
                 entry::create_ticks(bank.ticks_per_slot(), hashes_per_tick, blockhash);
             let last_entry_hash = entries.last().unwrap().hash;
             let tx = system_transaction::transfer(funded_keypair, &keypair.pubkey(), 2, blockhash);
-            let trailing_entry = entry::next_entry(&last_entry_hash, 1, vec![tx]);
+            let trailing_entry = entry::next_entry(&last_entry_hash, 1, vec![tx], false);
             entries.push(trailing_entry);
             entries_to_test_shreds(
                 &entries,
