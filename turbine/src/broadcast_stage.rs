@@ -534,7 +534,7 @@ pub mod test {
         let num_entries = max_ticks_per_n_shreds(num, None);
         let entries = create_ticks(num_entries, /*hashes_per_tick:*/ 0, Hash::default());
         let shredder = Shredder::new(
-            slot, /*parent_slot:*/ 0, /*reference_tick:*/ 0, /*version:*/ 0,
+            slot, /*parent_slot:*/ 0, /*reference_tick:*/ 0, /*version:*/ 0,1, 0
         )
         .unwrap();
         let (data_shreds, coding_shreds) = shredder.entries_to_shreds(

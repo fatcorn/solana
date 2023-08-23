@@ -760,6 +760,7 @@ mod tests {
             prev_hash,
             rng.gen_range(1, 64), // num_hashes
             txs,
+            false
         )
     }
 
@@ -783,6 +784,8 @@ mod tests {
                     parent_slot,
                     rng.gen_range(0, 0x40), // reference_tick
                     rng.gen(),              // version
+                    1,
+                    0
                 )
                 .unwrap()
                 .entries_to_shreds(

@@ -3493,7 +3493,7 @@ mod tests {
         let leader = Arc::new(Keypair::new());
         let keypair = Keypair::new();
         let (slot, parent_slot, reference_tick, version) = (53084024, 53084023, 0, 0);
-        let shredder = Shredder::new(slot, parent_slot, reference_tick, version).unwrap();
+        let shredder = Shredder::new(slot, parent_slot, reference_tick, version,1, 0).unwrap();
         let next_shred_index = rng.gen_range(0, 32_000);
         let shred = new_rand_shred(&mut rng, next_shred_index, &shredder, &leader);
         let other_payload = {
@@ -4568,7 +4568,7 @@ mod tests {
 
         let mut rng = rand::thread_rng();
         let (slot, parent_slot, reference_tick, version) = (53084024, 53084023, 0, 0);
-        let shredder = Shredder::new(slot, parent_slot, reference_tick, version).unwrap();
+        let shredder = Shredder::new(slot, parent_slot, reference_tick, version,1, 0).unwrap();
         let next_shred_index = 353;
         let leader = Arc::new(Keypair::new());
         let shred1 = new_rand_shred(&mut rng, next_shred_index, &shredder, &leader);
@@ -4587,7 +4587,7 @@ mod tests {
         }
 
         let slot = 53084025;
-        let shredder = Shredder::new(slot, parent_slot, reference_tick, version).unwrap();
+        let shredder = Shredder::new(slot, parent_slot, reference_tick, version,1, 0).unwrap();
         let next_shred_index = 354;
         let shred3 = new_rand_shred(&mut rng, next_shred_index, &shredder, &leader);
         let shred4 = new_rand_shred(&mut rng, next_shred_index, &shredder, &leader);

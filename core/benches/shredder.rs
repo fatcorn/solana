@@ -45,7 +45,7 @@ fn make_shreds(num_shreds: usize) -> Vec<Shred> {
         Some(LEGACY_SHRED_DATA_CAPACITY),
     );
     let entries = make_large_unchained_entries(txs_per_entry, num_entries);
-    let shredder = Shredder::new(1, 0, 0, 0).unwrap();
+    let shredder = Shredder::new(1, 0, 0, 0, 1, 0).unwrap();
     let (data_shreds, _) = shredder.entries_to_shreds(
         &Keypair::new(),
         &entries,
@@ -81,7 +81,7 @@ fn bench_shredder_ticks(bencher: &mut Bencher) {
     let entries = create_ticks(num_ticks, 0, Hash::default());
     let reed_solomon_cache = ReedSolomonCache::default();
     bencher.iter(|| {
-        let shredder = Shredder::new(1, 0, 0, 0).unwrap();
+        let shredder = Shredder::new(1, 0, 0, 0, 1, 0).unwrap();
         shredder.entries_to_shreds(
             &kp,
             &entries,
@@ -110,7 +110,7 @@ fn bench_shredder_large_entries(bencher: &mut Bencher) {
     let reed_solomon_cache = ReedSolomonCache::default();
     // 1Mb
     bencher.iter(|| {
-        let shredder = Shredder::new(1, 0, 0, 0).unwrap();
+        let shredder = Shredder::new(1, 0, 0, 0, 1, 0).unwrap();
         shredder.entries_to_shreds(
             &kp,
             &entries,
@@ -132,7 +132,7 @@ fn bench_deshredder(bencher: &mut Bencher) {
     let num_shreds = ((10000 * 1000) + (shred_size - 1)) / shred_size;
     let num_ticks = max_ticks_per_n_shreds(1, Some(shred_size)) * num_shreds as u64;
     let entries = create_ticks(num_ticks, 0, Hash::default());
-    let shredder = Shredder::new(1, 0, 0, 0).unwrap();
+    let shredder = Shredder::new(1, 0, 0, 0,1, 0).unwrap();
     let (data_shreds, _) = shredder.entries_to_shreds(
         &kp,
         &entries,

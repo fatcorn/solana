@@ -79,12 +79,14 @@ impl BroadcastRun for FailEntryVerificationBroadcastRun {
                 None
             }
         };
-
+        // Todo, according broadcast fail run logic, input truly slot, add by jesse
         let shredder = Shredder::new(
             bank.slot(),
             bank.parent().unwrap().slot(),
             (bank.tick_height() % bank.ticks_per_slot()) as u8,
             self.shred_version,
+            1,
+            0,
         )
         .expect("Expected to create a new shredder");
 

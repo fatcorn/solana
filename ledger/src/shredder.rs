@@ -48,6 +48,9 @@ pub struct Shredder {
     parent_slot: Slot,
     version: u16,
     reference_tick: u8,
+    // Add truly slot in shredder, and this var will link with virtual slot
+    t_slot: Slot,
+    t_parent_slot: Slot,
 }
 
 impl Shredder {
@@ -56,6 +59,8 @@ impl Shredder {
         parent_slot: Slot,
         reference_tick: u8,
         version: u16,
+        t_slot: Slot,
+        t_parent_slot: Slot,
     ) -> Result<Self, Error> {
         if slot < parent_slot || slot - parent_slot > u64::from(std::u16::MAX) {
             Err(Error::InvalidParentSlot { slot, parent_slot })
@@ -65,6 +70,8 @@ impl Shredder {
                 parent_slot,
                 reference_tick,
                 version,
+                t_slot,
+                t_parent_slot
             })
         }
     }
@@ -498,16 +505,16 @@ mod tests {
 
         // Test that parent cannot be > current slot
         assert_matches!(
-            Shredder::new(slot, slot + 1, 0, 0),
+            Shredder::new(slot, slot + 1, 0, 0, 1, 0),
             Err(Error::InvalidParentSlot { .. })
         );
         // Test that slot - parent cannot be > u16 MAX
         assert_matches!(
-            Shredder::new(slot, slot - 1 - 0xffff, 0, 0),
+            Shredder::new(slot, slot - 1 - 0xffff, 0, 0, 1, 0),
             Err(Error::InvalidParentSlot { .. })
         );
         let parent_slot = slot - 5;
-        let shredder = Shredder::new(slot, parent_slot, 0, 0).unwrap();
+        let shredder = Shredder::new(slot, parent_slot, 0, 0, 1, 0).unwrap();
         let entries: Vec<_> = (0..5)
             .map(|_| {
                 let keypair0 = Keypair::new();
@@ -593,7 +600,7 @@ mod tests {
         let keypair = Arc::new(Keypair::new());
         let slot = 1;
         let parent_slot = 0;
-        let shredder = Shredder::new(slot, parent_slot, 0, 0).unwrap();
+        let shredder = Shredder::new(slot, parent_slot, 0, 0, 1, 0).unwrap();
         let entries: Vec<_> = (0..5)
             .map(|_| {
                 let keypair0 = Keypair::new();
@@ -625,7 +632,7 @@ mod tests {
         let keypair = Arc::new(Keypair::new());
         let slot = 1;
         let parent_slot = 0;
-        let shredder = Shredder::new(slot, parent_slot, 5, 0).unwrap();
+        let shredder = Shredder::new(slot, parent_slot, 5, 0, 1, 0).unwrap();
         let entries: Vec<_> = (0..5)
             .map(|_| {
                 let keypair0 = Keypair::new();
@@ -662,7 +669,7 @@ mod tests {
         let keypair = Arc::new(Keypair::new());
         let slot = 1;
         let parent_slot = 0;
-        let shredder = Shredder::new(slot, parent_slot, u8::max_value(), 0).unwrap();
+        let shredder = Shredder::new(slot, parent_slot, u8::max_value(), 0, 1, 0).unwrap();
         let entries: Vec<_> = (0..5)
             .map(|_| {
                 let keypair0 = Keypair::new();
@@ -705,7 +712,7 @@ mod tests {
 
     fn run_test_data_and_code_shredder(slot: Slot) {
         let keypair = Arc::new(Keypair::new());
-        let shredder = Shredder::new(slot, slot - 5, 0, 0).unwrap();
+        let shredder = Shredder::new(slot, slot - 5, 0, 0, 1 , 0).unwrap();
         // Create enough entries to make > 1 shred
         let data_buffer_size = ShredData::capacity(/*merkle_proof_size:*/ None).unwrap();
         let num_entries = max_ticks_per_n_shreds(1, Some(data_buffer_size)) + 1;
@@ -754,7 +761,7 @@ mod tests {
 
     fn run_test_recovery_and_reassembly(slot: Slot, is_last_in_slot: bool) {
         let keypair = Arc::new(Keypair::new());
-        let shredder = Shredder::new(slot, slot - 5, 0, 0).unwrap();
+        let shredder = Shredder::new(slot, slot - 5, 0, 0, 1, 0).unwrap();
         let keypair0 = Keypair::new();
         let keypair1 = Keypair::new();
         let tx0 = system_transaction::transfer(&keypair0, &keypair1.pubkey(), 1, Hash::default());
@@ -1006,6 +1013,8 @@ mod tests {
             slot - rng.gen_range(1, 27), // parent slot
             0,                           // reference tick
             rng.gen(),                   // version
+            1,
+            0,
         )
         .unwrap();
         let next_shred_index = rng.gen_range(1, 1024);
@@ -1061,7 +1070,7 @@ mod tests {
         let hash = hash(Hash::default().as_ref());
         let version = shred_version::version_from_hash(&hash);
         assert_ne!(version, 0);
-        let shredder = Shredder::new(0, 0, 0, version).unwrap();
+        let shredder = Shredder::new(0, 0, 0, version, 1, 0).unwrap();
         let entries: Vec<_> = (0..5)
             .map(|_| {
                 let keypair0 = Keypair::new();
@@ -1094,7 +1103,7 @@ mod tests {
         let hash = hash(Hash::default().as_ref());
         let version = shred_version::version_from_hash(&hash);
         assert_ne!(version, 0);
-        let shredder = Shredder::new(0, 0, 0, version).unwrap();
+        let shredder = Shredder::new(0, 0, 0, version, 1, 0).unwrap();
         let entries: Vec<_> = (0..500)
             .map(|_| {
                 let keypair0 = Keypair::new();
@@ -1152,7 +1161,7 @@ mod tests {
         let hash = hash(Hash::default().as_ref());
         let version = shred_version::version_from_hash(&hash);
         assert_ne!(version, 0);
-        let shredder = Shredder::new(0, 0, 0, version).unwrap();
+        let shredder = Shredder::new(0, 0, 0, version, 1, 0).unwrap();
         let entries: Vec<_> = (0..500)
             .map(|_| {
                 let keypair0 = Keypair::new();

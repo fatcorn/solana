@@ -235,10 +235,10 @@ mod tests {
             _ => keypair,
         };
         let mut rng = rand::thread_rng();
-        let shredder = Shredder::new(slot, slot - 1, 0, 0).unwrap();
+        let shredder = Shredder::new(slot, slot - 1, 0, 0,1, 0).unwrap();
         let next_shred_index = 353;
         let shred1 = new_rand_shred(&mut rng, next_shred_index, &shredder, &my_keypair);
-        let shredder1 = Shredder::new(slot + 1, slot, 0, 0).unwrap();
+        let shredder1 = Shredder::new(slot + 1, slot, 0, 0,1, 0).unwrap();
         let shred2 = match expected_error {
             Some(Error::SlotMismatch) => {
                 new_rand_shred(&mut rng, next_shred_index, &shredder1, &my_keypair)

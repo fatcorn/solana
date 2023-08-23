@@ -1747,7 +1747,8 @@ impl Blockstore {
         let mut remaining_ticks_in_slot = num_slots * ticks_per_slot - num_ticks_in_start_slot;
 
         let mut current_slot = start_slot;
-        let mut shredder = Shredder::new(current_slot, parent_slot, 0, version).unwrap();
+        //Not input truly slot, cause the func only use by tests, add by jesse
+        let mut shredder = Shredder::new(current_slot, parent_slot, 0, version,1, 0).unwrap();
         let mut all_shreds = vec![];
         let mut slot_entries = vec![];
         let reed_solomon_cache = ReedSolomonCache::default();
@@ -1782,6 +1783,8 @@ impl Blockstore {
                     parent_slot,
                     (ticks_per_slot - remaining_ticks_in_slot) as u8,
                     version,
+                    1,
+                    0
                 )
                 .unwrap();
             }
@@ -4037,8 +4040,8 @@ pub fn create_new_ledger(
     let entries = create_ticks(ticks_per_slot, hashes_per_tick, genesis_config.hash());
     let last_hash = entries.last().unwrap().hash;
     let version = solana_sdk::shred_version::version_from_hash(&last_hash);
-
-    let shredder = Shredder::new(0, 0, 0, version).unwrap();
+    // Since virtual slot not input, truly slot too. add by jesse
+    let shredder = Shredder::new(0, 0, 0, version,0, 0).unwrap();
     let (shreds, _) = shredder.entries_to_shreds(
         &Keypair::new(),
         &entries,
@@ -4298,7 +4301,8 @@ pub fn entries_to_test_shreds(
     version: u16,
     merkle_variant: bool,
 ) -> Vec<Shred> {
-    Shredder::new(slot, parent_slot, 0, version)
+    // Todo, this likely is a test func, but invoke in many place, check in later, add by jesse
+    Shredder::new(slot, parent_slot, 0, version, 1, 0)
         .unwrap()
         .entries_to_shreds(
             &Keypair::new(),
@@ -4581,7 +4585,7 @@ pub mod tests {
                 vec![solana_sdk::pubkey::new_rand()],
                 vec![CompiledInstruction::new(1, &(), vec![0])],
             );
-            entries.push(next_entry_mut(&mut Hash::default(), 0, vec![transaction]));
+            entries.push(next_entry_mut(&mut Hash::default(), 0, vec![transaction], false));
             let mut tick = create_ticks(1, 0, hash(&serialize(&x).unwrap()));
             entries.append(&mut tick);
         }
@@ -8442,7 +8446,7 @@ pub mod tests {
                     vec![solana_sdk::pubkey::new_rand()],
                     vec![CompiledInstruction::new(1, &(), vec![0])],
                 );
-                entries.push(next_entry_mut(&mut Hash::default(), 0, vec![transaction]));
+                entries.push(next_entry_mut(&mut Hash::default(), 0, vec![transaction], false));
                 let mut tick = create_ticks(1, 0, hash(&serialize(address).unwrap()));
                 entries.append(&mut tick);
             }
@@ -8881,9 +8885,9 @@ pub mod tests {
         let empty_entries_iterator = entries.iter();
         assert!(get_last_hash(empty_entries_iterator).is_none());
 
-        let entry = next_entry(&hash::hash(&[42u8]), 1, vec![]);
+        let entry = next_entry(&hash::hash(&[42u8]), 1, vec![], true);
         let entries: Vec<Entry> = std::iter::successors(Some(entry), |entry| {
-            Some(next_entry(&entry.hash, 1, vec![]))
+            Some(next_entry(&entry.hash, 1, vec![], true))
         })
         .take(10)
         .collect();
@@ -9310,7 +9314,7 @@ pub mod tests {
     ) -> (Vec<Shred>, Vec<Shred>, Arc<LeaderScheduleCache>) {
         let entries = make_slot_entries_with_transactions(num_entries);
         let leader_keypair = Arc::new(Keypair::new());
-        let shredder = Shredder::new(slot, parent_slot, 0, 0).unwrap();
+        let shredder = Shredder::new(slot, parent_slot, 0, 0, 1, 0).unwrap();
         let (data_shreds, coding_shreds) = shredder.entries_to_shreds(
             &leader_keypair,
             &entries,
@@ -9374,7 +9378,7 @@ pub mod tests {
         let entries2 = make_slot_entries_with_transactions(1);
         let leader_keypair = Arc::new(Keypair::new());
         let reed_solomon_cache = ReedSolomonCache::default();
-        let shredder = Shredder::new(slot, 0, 0, 0).unwrap();
+        let shredder = Shredder::new(slot, 0, 0, 0, 1, 0).unwrap();
         let (shreds, _) = shredder.entries_to_shreds(
             &leader_keypair,
             &entries1,
@@ -9710,7 +9714,7 @@ pub mod tests {
             })
             .collect();
 
-        Entry::new(&Hash::default(), 1, txs)
+        Entry::new(&Hash::default(), 1, txs, false)
     }
 
     #[test]

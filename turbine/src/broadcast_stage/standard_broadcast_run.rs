@@ -82,8 +82,9 @@ impl StandardBroadcastRun {
             Some(ref state) if state.slot == current_slot => Vec::default(),
             Some(ref mut state) => {
                 let reference_tick = max_ticks_in_slot & SHRED_TICK_REFERENCE_MASK;
+                // To do, add correct slot after UnfinishedSlotInfo complete, add by jesse
                 let shredder =
-                    Shredder::new(state.slot, state.parent, reference_tick, self.shred_version)
+                    Shredder::new(state.slot, state.parent, reference_tick, self.shred_version, 1, 0)
                         .unwrap();
                 let merkle_variant = should_use_merkle_variant(state.slot, cluster_type);
                 let (mut shreds, coding_shreds) = shredder.entries_to_shreds(
@@ -127,6 +128,10 @@ impl StandardBroadcastRun {
         ),
         BroadcastError,
     > {
+        let mut entries_iterator = entries.iter();
+        let virtual_entries : Vec<_> = entries_iterator.clone().filter(|x| x.is_vote ).cloned().collect();
+        let truly_entries : Vec<_> = entries_iterator.cloned().collect();
+
         let (slot, parent_slot) = self.current_slot_and_parent.unwrap();
         let (next_shred_index, next_code_index) = match &self.unfinished_slot {
             Some(state) => (state.next_shred_index, state.next_code_index),
@@ -145,8 +150,9 @@ impl StandardBroadcastRun {
                 (0u32, 0u32)
             }
         };
+        let (t_slot, t_parent_slot) = self.t_current_slot_and_parent.unwrap();
         let shredder =
-            Shredder::new(slot, parent_slot, reference_tick, self.shred_version).unwrap();
+            Shredder::new(slot, parent_slot, reference_tick, self.shred_version, t_slot, t_parent_slot).unwrap();
         let merkle_variant = should_use_merkle_variant(slot, cluster_type);
         let (data_shreds, coding_shreds) = shredder.entries_to_shreds(
             keypair,

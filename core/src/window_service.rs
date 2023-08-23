@@ -504,7 +504,8 @@ mod test {
         parent: Slot,
         keypair: &Keypair,
     ) -> Vec<Shred> {
-        let shredder = Shredder::new(slot, parent, 0, 0).unwrap();
+        // todo input truly slot, add by jesse
+        let shredder = Shredder::new(slot, parent, 0, 0, 1, 0).unwrap();
         let (data_shreds, _) = shredder.entries_to_shreds(
             keypair,
             entries,

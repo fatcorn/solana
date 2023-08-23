@@ -112,7 +112,7 @@ mod tests {
         let listener = DuplicateShredListener::new(exit.clone(), cluster_info.clone(), handler);
         let mut rng = rand::thread_rng();
         let (slot, parent_slot, reference_tick, version) = (53084024, 53084023, 0, 0);
-        let shredder = Shredder::new(slot, parent_slot, reference_tick, version).unwrap();
+        let shredder = Shredder::new(slot, parent_slot, reference_tick, version,1, 0).unwrap();
         let next_shred_index = 353;
         let leader = Arc::new(Keypair::new());
         let shred1 = new_rand_shred(&mut rng, next_shred_index, &shredder, &leader);
