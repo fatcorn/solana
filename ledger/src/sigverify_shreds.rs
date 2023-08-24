@@ -497,6 +497,8 @@ mod tests {
             0,
             0,
             0xc0de,
+            0,
+            false,
         );
         assert_eq!(shred.slot(), slot);
         let keypair = Keypair::new();
@@ -539,6 +541,8 @@ mod tests {
             0,
             0,
             0xc0de,
+            0,
+            false,
         );
         let keypair = Keypair::new();
         shred.sign(&keypair);
@@ -594,6 +598,8 @@ mod tests {
             0,
             0,
             0xc0de,
+            0,
+            false,
         );
         let keypair = Keypair::new();
         shred.sign(&keypair);
@@ -663,6 +669,8 @@ mod tests {
                 1,
                 2,
                 0xc0de,
+                0,
+                false,
             );
             shred.copy_to_packet(p);
         }
@@ -715,6 +723,8 @@ mod tests {
             0,
             0,
             0xc0de,
+            0,
+            false,
         );
         batches[0].resize(1, Packet::default());
         batches[0][0].buffer_mut()[..shred.payload().len()].copy_from_slice(shred.payload());
@@ -797,6 +807,7 @@ mod tests {
                     rng.gen(),              // merkle_variant,
                     &reed_solomon_cache,
                     &mut ProcessShredsStats::default(),
+                    false
                 );
                 [data_shreds, coding_shreds]
             })

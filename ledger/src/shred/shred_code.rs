@@ -56,6 +56,8 @@ impl ShredCode {
         num_coding_shreds: u16,
         position: u16,
         version: u16,
+        t_slot: Slot,
+        is_virtual: bool,
     ) -> Self {
         Self::from(legacy::ShredCode::new_from_parity_shard(
             slot,
@@ -66,6 +68,8 @@ impl ShredCode {
             num_coding_shreds,
             position,
             version,
+            t_slot,
+            is_virtual
         ))
     }
 

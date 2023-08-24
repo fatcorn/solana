@@ -619,6 +619,8 @@ mod tests {
             0,
             version,
             0,
+            1,
+            false,
         );
         let mut rng = ChaChaRng::from_seed([0xa5; 32]);
         let shred_deduper = ShredDeduper::<2>::new(&mut rng, /*num_bits:*/ 640_007);
@@ -636,6 +638,8 @@ mod tests {
             0,
             version,
             0,
+            1,
+            false,
         );
         // first duplicate shred for (1, 5) passed
         assert!(!shred_deduper.dedup(shred.id(), shred.payload(), MAX_DUPLICATE_COUNT));
@@ -651,24 +655,26 @@ mod tests {
             0,
             version,
             0,
+            1,
+            false,
         );
         // 2nd duplicate shred for (1, 5) blocked
         assert!(shred_deduper.dedup(shred.id(), shred.payload(), MAX_DUPLICATE_COUNT));
         assert!(shred_deduper.dedup(shred.id(), shred.payload(), MAX_DUPLICATE_COUNT));
 
-        let shred = Shred::new_from_parity_shard(slot, index, &[], 0, 1, 1, 0, version);
+        let shred = Shred::new_from_parity_shard(slot, index, &[], 0, 1, 1, 0, version, 1, false);
         // Coding at (1, 5) passes
         assert!(!shred_deduper.dedup(shred.id(), shred.payload(), MAX_DUPLICATE_COUNT));
         // then blocked
         assert!(shred_deduper.dedup(shred.id(), shred.payload(), MAX_DUPLICATE_COUNT));
 
-        let shred = Shred::new_from_parity_shard(slot, index, &[], 2, 1, 1, 0, version);
+        let shred = Shred::new_from_parity_shard(slot, index, &[], 2, 1, 1, 0, version, 1, false);
         // 2nd unique coding at (1, 5) passes
         assert!(!shred_deduper.dedup(shred.id(), shred.payload(), MAX_DUPLICATE_COUNT));
         // same again is blocked
         assert!(shred_deduper.dedup(shred.id(), shred.payload(), MAX_DUPLICATE_COUNT));
 
-        let shred = Shred::new_from_parity_shard(slot, index, &[], 3, 1, 1, 0, version);
+        let shred = Shred::new_from_parity_shard(slot, index, &[], 3, 1, 1, 0, version, 1, false);
         // Another unique coding at (1, 5) always blocked
         assert!(shred_deduper.dedup(shred.id(), shred.payload(), MAX_DUPLICATE_COUNT));
         assert!(shred_deduper.dedup(shred.id(), shred.payload(), MAX_DUPLICATE_COUNT));

@@ -101,7 +101,7 @@ fn bench_retransmitter(bencher: &mut Bencher) {
         tokio::sync::mpsc::channel(/*capacity:*/ 128);
     let slot = 0;
     let parent = 0;
-    let shredder = Shredder::new(slot, parent, 0, 0).unwrap();
+    let shredder = Shredder::new(slot, parent, 0, 0, 1, 0).unwrap();
     let (mut data_shreds, _) = shredder.entries_to_shreds(
         &keypair,
         &entries,
@@ -111,6 +111,7 @@ fn bench_retransmitter(bencher: &mut Bencher) {
         true, // merkle_variant
         &ReedSolomonCache::default(),
         &mut ProcessShredsStats::default(),
+        false,
     );
 
     let num_packets = data_shreds.len();

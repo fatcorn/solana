@@ -313,6 +313,7 @@ pub(crate) mod tests {
         })
         .take(5)
         .collect();
+        // todo, make sure this func has valid invoke, to input the is_virtual, add by jesse
         let (mut data_shreds, _coding_shreds) = shredder.entries_to_shreds(
             keypair,
             &entries,
@@ -322,6 +323,7 @@ pub(crate) mod tests {
             true,             // merkle_variant
             &ReedSolomonCache::default(),
             &mut ProcessShredsStats::default(),
+            false,
         );
         data_shreds.swap_remove(0)
     }

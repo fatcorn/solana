@@ -55,6 +55,7 @@ fn make_shreds(num_shreds: usize) -> Vec<Shred> {
         false, // merkle_variant
         &ReedSolomonCache::default(),
         &mut ProcessShredsStats::default(),
+        false,
     );
     assert!(data_shreds.len() >= num_shreds);
     data_shreds
@@ -91,6 +92,7 @@ fn bench_shredder_ticks(bencher: &mut Bencher) {
             true, // merkle_variant
             &reed_solomon_cache,
             &mut ProcessShredsStats::default(),
+            false
         );
     })
 }
@@ -120,6 +122,7 @@ fn bench_shredder_large_entries(bencher: &mut Bencher) {
             true, // merkle_variant
             &reed_solomon_cache,
             &mut ProcessShredsStats::default(),
+            false
         );
     })
 }
@@ -142,6 +145,7 @@ fn bench_deshredder(bencher: &mut Bencher) {
         true, // merkle_variant
         &ReedSolomonCache::default(),
         &mut ProcessShredsStats::default(),
+        false,
     );
     bencher.iter(|| {
         let raw = &mut Shredder::deshred(&data_shreds).unwrap();
@@ -153,7 +157,7 @@ fn bench_deshredder(bencher: &mut Bencher) {
 fn bench_deserialize_hdr(bencher: &mut Bencher) {
     let data = vec![0; LEGACY_SHRED_DATA_CAPACITY];
 
-    let shred = Shred::new_from_data(2, 1, 1, &data, ShredFlags::LAST_SHRED_IN_SLOT, 0, 0, 1);
+    let shred = Shred::new_from_data(2, 1, 1, &data, ShredFlags::LAST_SHRED_IN_SLOT, 0, 0, 1, 1, false);
 
     bencher.iter(|| {
         let payload = shred.payload().clone();

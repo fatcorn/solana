@@ -48,7 +48,7 @@ pub struct Shredder {
     parent_slot: Slot,
     version: u16,
     reference_tick: u8,
-    // Add truly slot in shredder, and this var will link with virtual slot
+    // Add truly slot in shredder, and this var will link with virtual slot, add by jesse
     t_slot: Slot,
     t_parent_slot: Slot,
 }
@@ -86,6 +86,7 @@ impl Shredder {
         merkle_variant: bool,
         reed_solomon_cache: &ReedSolomonCache,
         stats: &mut ProcessShredsStats,
+        is_virtual: bool,
     ) -> (
         Vec<Shred>, // data shreds
         Vec<Shred>, // coding shreds
@@ -97,6 +98,8 @@ impl Shredder {
                 entries,
                 self.slot,
                 self.parent_slot,
+                self.t_slot,
+                self.t_parent_slot,
                 self.version,
                 self.reference_tick,
                 is_last_in_slot,
@@ -104,13 +107,14 @@ impl Shredder {
                 next_code_index,
                 reed_solomon_cache,
                 stats,
+                is_virtual
             )
             .unwrap()
             .into_iter()
             .partition(Shred::is_data);
         }
         let data_shreds =
-            self.entries_to_data_shreds(keypair, entries, is_last_in_slot, next_shred_index, stats);
+            self.entries_to_data_shreds(keypair, entries, is_last_in_slot, next_shred_index, stats, is_virtual);
         let coding_shreds = Self::data_shreds_to_coding_shreds(
             keypair,
             &data_shreds,
@@ -129,6 +133,7 @@ impl Shredder {
         is_last_in_slot: bool,
         next_shred_index: u32,
         process_stats: &mut ProcessShredsStats,
+        is_virtual: bool,
     ) -> Vec<Shred> {
         let mut serialize_time = Measure::start("shred_serialize");
         let serialized_shreds =
@@ -152,6 +157,7 @@ impl Shredder {
             } else {
                 ShredFlags::DATA_COMPLETE_SHRED
             };
+            // todo, if the shred is truly shred, parent offset from t_slot, add by jesse
             let parent_offset = self.slot - self.parent_slot;
             let mut shred = Shred::new_from_data(
                 self.slot,
@@ -162,6 +168,8 @@ impl Shredder {
                 self.reference_tick,
                 self.version,
                 fec_set_index,
+                self.t_slot,
+                is_virtual,
             );
             shred.sign(keypair);
             shred
@@ -266,13 +274,15 @@ impl Shredder {
         next_code_index: u32,
         reed_solomon_cache: &ReedSolomonCache,
     ) -> Vec<Shred> {
-        let (slot, index, version, fec_set_index) = {
+        let (slot, index, version, fec_set_index, t_slot, is_virtual) = {
             let shred = data.first().unwrap().borrow();
             (
                 shred.slot(),
                 shred.index(),
                 shred.version(),
                 shred.fec_set_index(),
+                shred.t_slot(),
+                shred.is_virtual(),
             )
         };
         assert_eq!(fec_set_index, index);
@@ -315,6 +325,8 @@ impl Shredder {
                     num_coding,
                     u16::try_from(i).unwrap(), // position
                     version,
+                    t_slot,
+                    is_virtual
                 )
             })
             .collect()
@@ -541,6 +553,7 @@ mod tests {
             true,        // merkle_variant
             &ReedSolomonCache::default(),
             &mut ProcessShredsStats::default(),
+            false
         );
         let next_index = data_shreds.last().unwrap().index() + 1;
         assert_eq!(next_index as usize, num_expected_data_shreds);
@@ -620,6 +633,7 @@ mod tests {
             true, // merkle_variant
             &ReedSolomonCache::default(),
             &mut ProcessShredsStats::default(),
+            false
         );
         let deserialized_shred =
             Shred::new_from_serialized_shred(data_shreds.last().unwrap().payload().clone())
@@ -652,6 +666,7 @@ mod tests {
             true, // merkle_variant
             &ReedSolomonCache::default(),
             &mut ProcessShredsStats::default(),
+            false,
         );
         data_shreds.iter().for_each(|s| {
             assert_eq!(s.reference_tick(), 5);
@@ -689,6 +704,7 @@ mod tests {
             true, // merkle_variant
             &ReedSolomonCache::default(),
             &mut ProcessShredsStats::default(),
+            false,
         );
         data_shreds.iter().for_each(|s| {
             assert_eq!(
@@ -735,6 +751,7 @@ mod tests {
             true, // merkle_variant
             &ReedSolomonCache::default(),
             &mut ProcessShredsStats::default(),
+            false,
         );
         for (i, s) in data_shreds.iter().enumerate() {
             verify_test_data_shred(
@@ -792,6 +809,7 @@ mod tests {
             false, // merkle_variant
             &reed_solomon_cache,
             &mut ProcessShredsStats::default(),
+            false,
         );
         let num_coding_shreds = coding_shreds.len();
 
@@ -929,6 +947,7 @@ mod tests {
             false, // merkle_variant
             &ReedSolomonCache::default(),
             &mut ProcessShredsStats::default(),
+            false,
         );
         // We should have 10 shreds now
         assert_eq!(data_shreds.len(), num_data_shreds);
@@ -1028,6 +1047,7 @@ mod tests {
             false,            // merkle_variant
             &reed_solomon_cache,
             &mut ProcessShredsStats::default(),
+            false,
         );
         let num_data_shreds = data_shreds.len();
         let mut shreds = coding_shreds;
@@ -1090,6 +1110,7 @@ mod tests {
             true, // merkle_variant
             &ReedSolomonCache::default(),
             &mut ProcessShredsStats::default(),
+            false,
         );
         assert!(!data_shreds
             .iter()
@@ -1124,6 +1145,7 @@ mod tests {
             true,        // merkle_variant
             &ReedSolomonCache::default(),
             &mut ProcessShredsStats::default(),
+            false,
         );
         const MIN_CHUNK_SIZE: usize = DATA_SHREDS_PER_FEC_BLOCK;
         let chunks: Vec<_> = data_shreds
@@ -1180,6 +1202,7 @@ mod tests {
             true, // is_last_in_slot
             start_index,
             &mut stats,
+            false,
         );
 
         let next_code_index = data_shreds[0].index();

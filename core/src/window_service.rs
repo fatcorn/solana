@@ -504,7 +504,7 @@ mod test {
         parent: Slot,
         keypair: &Keypair,
     ) -> Vec<Shred> {
-        // todo input truly slot, add by jesse
+        // todo input truly slot, may be not add by jesse
         let shredder = Shredder::new(slot, parent, 0, 0, 1, 0).unwrap();
         let (data_shreds, _) = shredder.entries_to_shreds(
             keypair,
@@ -515,6 +515,7 @@ mod test {
             true, // merkle_variant
             &ReedSolomonCache::default(),
             &mut ProcessShredsStats::default(),
+            false,
         );
         data_shreds
     }
@@ -661,6 +662,8 @@ mod test {
             6,   // num_coding_shreds
             4,   // position
             0,   // version
+            1,
+            false
         );
         let mut shreds = vec![shred.clone(), shred.clone(), shred];
         let repair_meta = RepairMeta { nonce: 0 };

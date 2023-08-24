@@ -19,11 +19,11 @@ pub(super) const SIGNED_MESSAGE_OFFSETS: Range<usize> =
     SIZE_OF_SIGNATURE..ShredData::SIZE_OF_PAYLOAD;
 const_assert_eq!(ShredData::SIZE_OF_PAYLOAD, ShredCode::SIZE_OF_PAYLOAD);
 const_assert_eq!(ShredData::SIZE_OF_PAYLOAD, 1228);
-const_assert_eq!(ShredData::CAPACITY, 1051);
+const_assert_eq!(ShredData::CAPACITY, 1033);
 
 // ShredCode::SIZE_OF_HEADERS bytes at the end of data shreds
 // is never used and is not part of erasure coding.
-const_assert_eq!(SIZE_OF_ERASURE_ENCODED_SLICE, 1139);
+const_assert_eq!(SIZE_OF_ERASURE_ENCODED_SLICE, 1130);
 pub(super) const SIZE_OF_ERASURE_ENCODED_SLICE: usize =
     ShredCode::SIZE_OF_PAYLOAD - ShredCode::SIZE_OF_HEADERS;
 
@@ -224,6 +224,8 @@ impl ShredData {
         reference_tick: u8,
         version: u16,
         fec_set_index: u32,
+        t_slot: Slot,
+        is_virtual: bool,
     ) -> Self {
         let mut payload = vec![0; Self::SIZE_OF_PAYLOAD];
         let common_header = ShredCommonHeader {
@@ -233,6 +235,8 @@ impl ShredData {
             index,
             version,
             fec_set_index,
+            t_slot,
+            is_virtual,
         };
         let size = (data.len() + Self::SIZE_OF_HEADERS) as u16;
         let flags = flags
@@ -293,6 +297,8 @@ impl ShredCode {
         num_coding_shreds: u16,
         position: u16,
         version: u16,
+        t_slot: Slot,
+        is_virtual: bool,
     ) -> Self {
         let common_header = ShredCommonHeader {
             signature: Signature::default(),
@@ -301,6 +307,8 @@ impl ShredCode {
             slot,
             version,
             fec_set_index,
+            t_slot,
+            is_virtual
         };
         let coding_header = CodingShredHeader {
             num_data_shreds,
@@ -345,6 +353,8 @@ mod test {
             3,  // reference_tick
             1,  // version
             16, // fec_set_index
+            1,
+                false
         );
         assert_matches!(shred.sanitize(), Ok(()));
         // Corrupt shred by making it too large
@@ -416,6 +426,8 @@ mod test {
             11,  // num_coding_shreds
             8,   // position
             0,   // version
+            0,
+            false,
         );
         assert_matches!(shred.sanitize(), Ok(()));
         // index < position is invalid.

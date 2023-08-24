@@ -173,6 +173,7 @@ impl BroadcastRun for BroadcastDuplicatesRun {
         )
         .expect("Expected to create a new shredder");
 
+        // Todo, input is_virtual, add by jesse
         let (data_shreds, coding_shreds) = shredder.entries_to_shreds(
             keypair,
             &receive_results.entries,
@@ -182,12 +183,14 @@ impl BroadcastRun for BroadcastDuplicatesRun {
             false, // merkle_variant
             &self.reed_solomon_cache,
             &mut ProcessShredsStats::default(),
+            false,
         );
 
         self.next_shred_index += data_shreds.len() as u32;
         if let Some(index) = coding_shreds.iter().map(Shred::index).max() {
             self.next_code_index = index + 1;
         }
+        // Todo, input is_virtual, add by jesse
         let last_shreds =
             last_entries.map(|(original_last_entry, duplicate_extra_last_entries)| {
                 let (original_last_data_shred, _) = shredder.entries_to_shreds(
@@ -199,10 +202,12 @@ impl BroadcastRun for BroadcastDuplicatesRun {
                     false, // merkle_variant
                     &self.reed_solomon_cache,
                     &mut ProcessShredsStats::default(),
+                    false
                 );
                 // Don't mark the last shred as last so that validators won't
                 // know that they've gotten all the shreds, and will continue
                 // trying to repair.
+                // Todo, input is_virtual, add by jesse
                 let (partition_last_data_shred, _) = shredder.entries_to_shreds(
                     keypair,
                     &duplicate_extra_last_entries,
@@ -212,6 +217,7 @@ impl BroadcastRun for BroadcastDuplicatesRun {
                     false, // merkle_variant
                     &self.reed_solomon_cache,
                     &mut ProcessShredsStats::default(),
+                    false
                 );
                 let sigs: Vec<_> = partition_last_data_shred
                     .iter()

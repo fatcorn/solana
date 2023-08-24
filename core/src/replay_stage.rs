@@ -4559,6 +4559,8 @@ pub(crate) mod tests {
                 0, // reference_tick
                 0, // version
                 0, // fec_set_index
+                0,
+                false,
             );
             vec![shred]
         });

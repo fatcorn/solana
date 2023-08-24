@@ -43,6 +43,8 @@ fn get_retransmit_peers_deterministic(
             0,
             0,
             0,
+            1,
+            false
         );
         let _retransmit_peers =
             cluster_nodes.get_retransmit_peers(slot_leader, &shred.id(), /*fanout:*/ 200);

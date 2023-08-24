@@ -546,6 +546,7 @@ pub mod test {
             true, // merkle_variant
             &ReedSolomonCache::default(),
             &mut ProcessShredsStats::default(),
+            false
         );
         (
             data_shreds.clone(),

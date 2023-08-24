@@ -50,6 +50,8 @@ impl ShredData {
         reference_tick: u8,
         version: u16,
         fec_set_index: u32,
+        t_slot: Slot,
+        is_virtual: bool,
     ) -> Self {
         Self::from(legacy::ShredData::new_from_data(
             slot,
@@ -60,6 +62,8 @@ impl ShredData {
             reference_tick,
             version,
             fec_set_index,
+            t_slot,
+            is_virtual,
         ))
     }
 

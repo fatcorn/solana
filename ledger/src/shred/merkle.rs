@@ -37,7 +37,7 @@ use {
 
 const_assert_eq!(SIZE_OF_MERKLE_PROOF_ENTRY, 20);
 const SIZE_OF_MERKLE_PROOF_ENTRY: usize = std::mem::size_of::<MerkleProofEntry>();
-const_assert_eq!(ShredData::SIZE_OF_PAYLOAD, 1203);
+const_assert_eq!(ShredData::SIZE_OF_PAYLOAD, 1194);
 
 // Defense against second preimage attack:
 // https://en.wikipedia.org/wiki/Merkle_tree#Second_preimage_attack
@@ -660,6 +660,8 @@ pub(super) fn recover(
             index: _,
             version,
             fec_set_index,
+            t_slot,
+            is_virtual,
         } = shred.common_header();
         signature == &common_header.signature
             && slot == &common_header.slot
@@ -678,6 +680,9 @@ pub(super) fn recover(
                         && num_coding_shreds == coding_header.num_coding_shreds
                 }
             }
+            // todo, need this condition, to be confirmed, add by jesse
+            && t_slot == &common_header.t_slot
+            && is_virtual == &common_header.is_virtual
     }));
     let num_data_shreds = usize::from(coding_header.num_data_shreds);
     let num_coding_shreds = usize::from(coding_header.num_coding_shreds);
@@ -721,11 +726,15 @@ pub(super) fn recover(
                     index: _,
                     version,
                     fec_set_index,
+                    t_slot,
+                    is_virtual,
                 } = shred.common_header;
                 if shred_variant != ShredVariant::MerkleData(proof_size)
                     || common_header.slot != slot
                     || common_header.version != version
                     || common_header.fec_set_index != fec_set_index
+                    || common_header.t_slot != t_slot
+                    || common_header.is_virtual != is_virtual
                 {
                     return Err(Error::InvalidRecoveredShred);
                 }
@@ -797,6 +806,8 @@ pub(super) fn make_shreds_from_data(
     mut data: &[u8], // Serialized &[Entry]
     slot: Slot,
     parent_slot: Slot,
+    t_slot: Slot,
+    t_parent_slot: Slot,
     shred_version: u16,
     reference_tick: u8,
     is_last_in_slot: bool,
@@ -804,6 +815,7 @@ pub(super) fn make_shreds_from_data(
     next_code_index: u32,
     reed_solomon_cache: &ReedSolomonCache,
     stats: &mut ProcessShredsStats,
+    is_virtual: bool,
 ) -> Result<Vec</*erasure batch:*/ Vec<Shred>>, Error> {
     fn new_shred_data(
         common_header: ShredCommonHeader,
@@ -832,12 +844,22 @@ pub(super) fn make_shreds_from_data(
         index: next_shred_index,
         version: shred_version,
         fec_set_index: next_shred_index,
+        t_slot,
+        is_virtual
     };
+
     let data_header = {
-        let parent_offset = slot
-            .checked_sub(parent_slot)
-            .and_then(|offset| u16::try_from(offset).ok())
-            .ok_or(Error::InvalidParentSlot { slot, parent_slot })?;
+        let parent_offset = if is_virtual {
+            slot
+                .checked_sub(parent_slot)
+                .and_then(|offset| u16::try_from(offset).ok())
+                .ok_or(Error::InvalidParentSlot { slot, parent_slot })?
+        } else {
+            t_slot
+                .checked_sub(t_parent_slot)
+                .and_then(|offset| u16::try_from(offset).ok())
+                .ok_or(Error::InvalidParentSlot { slot, parent_slot })?
+        };
         let flags = ShredFlags::from_bits_retain(
             ShredFlags::SHRED_TICK_REFERENCE_MASK
                 .bits()
@@ -1184,6 +1206,8 @@ mod test {
             index: 1835,
             version: rng.gen(),
             fec_set_index: 1835,
+            t_slot: 1,
+            is_virtual: false,
         };
         let data_header = {
             let reference_tick = rng.gen_range(0, 0x40);
@@ -1371,6 +1395,8 @@ mod test {
             &data[..],
             slot,
             parent_slot,
+            1,
+            0,
             shred_version,
             reference_tick,
             true, // is_last_in_slot
@@ -1378,6 +1404,7 @@ mod test {
             next_code_index,
             reed_solomon_cache,
             &mut ProcessShredsStats::default(),
+            false,
         )
         .unwrap();
         let shreds: Vec<_> = shreds.into_iter().flatten().collect();
@@ -1409,6 +1436,8 @@ mod test {
                 index,
                 version,
                 fec_set_index: _,
+                t_slot,
+                is_virtual,
             } = *shred.common_header();
             let shred_type = ShredType::from(shred_variant);
             let key = ShredId::new(slot, index, shred_type);

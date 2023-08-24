@@ -283,6 +283,8 @@ pub mod test {
                     8,                 // reference_tick
                     0,                 // version
                     last_shred as u32, // fec_set_index
+                    0,
+                    false
                 );
                 assert!(shred.sanitize().is_ok());
                 shred

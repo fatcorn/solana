@@ -335,6 +335,8 @@ mod tests {
             0, // reference_tick
             shred_version,
             3, // fec_set_index
+            1,
+            false,
         );
         shred.copy_to_packet(&mut packet);
 
@@ -396,6 +398,8 @@ mod tests {
             0, // reference_tick
             shred_version,
             0, // fec_set_index
+            1,
+            false,
         );
         shred.copy_to_packet(&mut packet);
 
@@ -439,6 +443,8 @@ mod tests {
             0,
             0,
             0,
+            1,
+            false,
         );
         shred.copy_to_packet(&mut packet);
 
@@ -453,7 +459,7 @@ mod tests {
         ));
 
         let index = MAX_DATA_SHREDS_PER_SLOT as u32;
-        let shred = Shred::new_from_data(5, index, 0, &[], ShredFlags::LAST_SHRED_IN_SLOT, 0, 0, 0);
+        let shred = Shred::new_from_data(5, index, 0, &[], ShredFlags::LAST_SHRED_IN_SLOT, 0, 0, 0, 1, false);
         shred.copy_to_packet(&mut packet);
         assert!(should_discard_shred(
             &packet,

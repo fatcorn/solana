@@ -1775,6 +1775,7 @@ impl Blockstore {
                     true,        // merkle_variant
                     &reed_solomon_cache,
                     &mut ProcessShredsStats::default(),
+                    false
                 );
                 all_shreds.append(&mut data_shreds);
                 all_shreds.append(&mut coding_shreds);
@@ -1805,6 +1806,7 @@ impl Blockstore {
                 true, // merkle_variant
                 &reed_solomon_cache,
                 &mut ProcessShredsStats::default(),
+                false
             );
             all_shreds.append(&mut data_shreds);
             all_shreds.append(&mut coding_shreds);
@@ -4040,7 +4042,7 @@ pub fn create_new_ledger(
     let entries = create_ticks(ticks_per_slot, hashes_per_tick, genesis_config.hash());
     let last_hash = entries.last().unwrap().hash;
     let version = solana_sdk::shred_version::version_from_hash(&last_hash);
-    // Since virtual slot not input, truly slot too. add by jesse
+    // TODO, Since virtual slot not input, truly slot too. need to check add by jesse
     let shredder = Shredder::new(0, 0, 0, version,0, 0).unwrap();
     let (shreds, _) = shredder.entries_to_shreds(
         &Keypair::new(),
@@ -4051,6 +4053,7 @@ pub fn create_new_ledger(
         true, // merkle_variant
         &ReedSolomonCache::default(),
         &mut ProcessShredsStats::default(),
+        true,
     );
     assert!(shreds.last().unwrap().last_in_slot());
 
@@ -4313,6 +4316,7 @@ pub fn entries_to_test_shreds(
             merkle_variant,
             &ReedSolomonCache::default(),
             &mut ProcessShredsStats::default(),
+            false
         )
         .0
 }
@@ -6367,6 +6371,8 @@ pub mod tests {
                     i as u8,
                     0,
                     (i * gap) as u32,
+                    0,
+                    false,
                 )
             })
             .collect();
@@ -6567,6 +6573,8 @@ pub mod tests {
             0, // reference_tick
             shred5.version(),
             shred5.fec_set_index(),
+            1,
+            false
         );
         assert!(blockstore.should_insert_data_shred(
             &empty_shred,
@@ -6671,6 +6679,8 @@ pub mod tests {
             11,  // num_coding_shreds
             8,   // position
             0,   // version
+            0,
+            false
         );
 
         let mut erasure_metas = HashMap::new();
@@ -6724,6 +6734,8 @@ pub mod tests {
             11,  // num_coding_shreds
             8,   // position
             0,   // version
+            0,
+            false,
         );
 
         // Insert a good coding shred
@@ -6954,6 +6966,8 @@ pub mod tests {
             0,
             0,
             next_shred_index as u32,
+            1,
+            false,
         )];
 
         // With the corruption, nothing should be returned, even though an
@@ -9324,6 +9338,7 @@ pub mod tests {
             true, // merkle_variant
             &ReedSolomonCache::default(),
             &mut ProcessShredsStats::default(),
+            false
         );
 
         let genesis_config = create_genesis_config(2).genesis_config;
@@ -9388,6 +9403,7 @@ pub mod tests {
             true, // merkle_variant
             &reed_solomon_cache,
             &mut ProcessShredsStats::default(),
+            false,
         );
         let (duplicate_shreds, _) = shredder.entries_to_shreds(
             &leader_keypair,
@@ -9398,6 +9414,7 @@ pub mod tests {
             true, // merkle_variant
             &reed_solomon_cache,
             &mut ProcessShredsStats::default(),
+            false,
         );
         let shred = shreds[0].clone();
         let duplicate_shred = duplicate_shreds[0].clone();

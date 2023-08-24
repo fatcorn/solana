@@ -78,6 +78,8 @@ mod test {
             0,
             0,
             0xc0de,
+            0,
+            false
         );
         assert_eq!(shred.slot(), slot);
         let keypair = Keypair::new();

@@ -58,6 +58,7 @@ fn test_multi_fec_block_coding() {
         false, // merkle_variant
         &reed_solomon_cache,
         &mut ProcessShredsStats::default(),
+        false,
     );
     let next_index = data_shreds.last().unwrap().index() + 1;
     assert_eq!(next_index as usize, num_data_shreds);
@@ -235,6 +236,7 @@ fn setup_different_sized_fec_blocks(
             false, // merkle_variant
             &reed_solomon_cache,
             &mut ProcessShredsStats::default(),
+            false,
         );
         for shred in &data_shreds {
             if (shred.index() as usize) == total_num_data_shreds - 1 {

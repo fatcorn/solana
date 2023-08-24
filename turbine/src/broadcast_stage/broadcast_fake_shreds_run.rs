@@ -57,7 +57,7 @@ impl BroadcastRun for BroadcastFakeShredsRun {
             0
         )
         .expect("Expected to create a new shredder");
-
+        // Todo, input is_virtual, add by jesse
         let (data_shreds, coding_shreds) = shredder.entries_to_shreds(
             keypair,
             &receive_results.entries,
@@ -67,6 +67,7 @@ impl BroadcastRun for BroadcastFakeShredsRun {
             true, // merkle_variant
             &self.reed_solomon_cache,
             &mut ProcessShredsStats::default(),
+            false
         );
 
         // If the last blockhash is default, a new block is being created
@@ -78,7 +79,7 @@ impl BroadcastRun for BroadcastFakeShredsRun {
         let fake_entries: Vec<_> = (0..num_entries)
             .map(|_| Entry::new(&self.last_blockhash, 0, vec![], false))
             .collect();
-
+        // Todo, input is_virtual, add by jesse
         let (fake_data_shreds, fake_coding_shreds) = shredder.entries_to_shreds(
             keypair,
             &fake_entries,
@@ -88,6 +89,7 @@ impl BroadcastRun for BroadcastFakeShredsRun {
             true, // merkle_variant
             &self.reed_solomon_cache,
             &mut ProcessShredsStats::default(),
+            false
         );
 
         if let Some(index) = coding_shreds

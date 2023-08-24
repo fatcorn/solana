@@ -89,7 +89,7 @@ impl BroadcastRun for FailEntryVerificationBroadcastRun {
             0,
         )
         .expect("Expected to create a new shredder");
-
+        // Todo, input is_virtual, add by jesse
         let (data_shreds, coding_shreds) = shredder.entries_to_shreds(
             keypair,
             &receive_results.entries,
@@ -99,12 +99,14 @@ impl BroadcastRun for FailEntryVerificationBroadcastRun {
             true, // merkle_variant
             &self.reed_solomon_cache,
             &mut ProcessShredsStats::default(),
+            false
         );
 
         self.next_shred_index += data_shreds.len() as u32;
         if let Some(index) = coding_shreds.iter().map(Shred::index).max() {
             self.next_code_index = index + 1;
         }
+        // Todo, input is_virtual, add by jesse
         let last_shreds = last_entries.map(|(good_last_entry, bad_last_entry)| {
             let (good_last_data_shred, _) = shredder.entries_to_shreds(
                 keypair,
@@ -115,10 +117,12 @@ impl BroadcastRun for FailEntryVerificationBroadcastRun {
                 true, // merkle_variant
                 &self.reed_solomon_cache,
                 &mut ProcessShredsStats::default(),
+                false
             );
             // Don't mark the last shred as last so that validators won't know
             // that they've gotten all the shreds, and will continue trying to
             // repair.
+            // Todo, input is_virtual, add by jesse
             let (bad_last_data_shred, _) = shredder.entries_to_shreds(
                 keypair,
                 &[bad_last_entry],
@@ -128,6 +132,7 @@ impl BroadcastRun for FailEntryVerificationBroadcastRun {
                 true, // merkle_variant
                 &self.reed_solomon_cache,
                 &mut ProcessShredsStats::default(),
+                false
             );
             self.next_shred_index += 1;
             (good_last_data_shred, bad_last_data_shred)

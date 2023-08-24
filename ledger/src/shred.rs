@@ -94,9 +94,10 @@ pub const SIZE_OF_NONCE: usize = std::mem::size_of::<Nonce>();
 /// The following constants are computed by hand, and hardcoded.
 /// `test_shred_constants` ensures that the values are correct.
 /// Constants are used over lazy_static for performance reasons.
-const SIZE_OF_COMMON_SHRED_HEADER: usize = 83;
-const SIZE_OF_DATA_SHRED_HEADERS: usize = 88;
-const SIZE_OF_CODING_SHRED_HEADERS: usize = 89;
+// Since add t_slot in shred common header, the headers of shred const should add 9, add by jesse
+const SIZE_OF_COMMON_SHRED_HEADER: usize = 92;
+const SIZE_OF_DATA_SHRED_HEADERS: usize = 97;
+const SIZE_OF_CODING_SHRED_HEADERS: usize = 98;
 const SIZE_OF_SIGNATURE: usize = SIGNATURE_BYTES;
 const SIZE_OF_SHRED_VARIANT: usize = 1;
 const SIZE_OF_SHRED_SLOT: usize = 8;
@@ -112,7 +113,7 @@ const OFFSET_OF_SHRED_INDEX: usize = OFFSET_OF_SHRED_SLOT + SIZE_OF_SHRED_SLOT;
 pub const DATA_SHREDS_PER_FEC_BLOCK: usize = 32;
 
 // For legacy tests and benchmarks.
-const_assert_eq!(LEGACY_SHRED_DATA_CAPACITY, 1051);
+const_assert_eq!(LEGACY_SHRED_DATA_CAPACITY, 1033);
 pub const LEGACY_SHRED_DATA_CAPACITY: usize = legacy::ShredData::CAPACITY;
 
 // LAST_SHRED_IN_SLOT also implies DATA_COMPLETE_SHRED.
@@ -206,6 +207,9 @@ struct ShredCommonHeader {
     index: u32,
     version: u16,
     fec_set_index: u32,
+    // t_slot for linking with slot, add by jesse
+    t_slot: Slot,
+    is_virtual: bool
 }
 
 /// The data shred header has parent offset and flags
@@ -358,6 +362,8 @@ impl Shred {
         reference_tick: u8,
         version: u16,
         fec_set_index: u32,
+        t_slot: Slot,
+        is_virtual: bool,
     ) -> Self {
         Self::from(ShredData::new_from_data(
             slot,
@@ -368,6 +374,8 @@ impl Shred {
             reference_tick,
             version,
             fec_set_index,
+            t_slot,
+            is_virtual
         ))
     }
 
@@ -401,6 +409,8 @@ impl Shred {
         num_coding_shreds: u16,
         position: u16,
         version: u16,
+        t_slot: Slot,
+        is_virtual: bool,
     ) -> Self {
         Self::from(ShredCode::new_from_parity_shard(
             slot,
@@ -411,6 +421,8 @@ impl Shred {
             num_coding_shreds,
             position,
             version,
+            t_slot,
+            is_virtual,
         ))
     }
 
@@ -421,6 +433,14 @@ impl Shred {
 
     pub fn slot(&self) -> Slot {
         self.common_header().slot
+    }
+
+    pub fn t_slot(&self) -> Slot {
+        self.common_header().t_slot
+    }
+
+    pub fn is_virtual(&self) -> bool {
+        self.common_header().is_virtual
     }
 
     pub fn parent(&self) -> Result<Slot, Error> {
@@ -858,6 +878,8 @@ pub(crate) fn make_merkle_shreds_from_entries(
     entries: &[Entry],
     slot: Slot,
     parent_slot: Slot,
+    t_slot: Slot,
+    t_parent_slot: Slot,
     shred_version: u16,
     reference_tick: u8,
     is_last_in_slot: bool,
@@ -865,6 +887,7 @@ pub(crate) fn make_merkle_shreds_from_entries(
     next_code_index: u32,
     reed_solomon_cache: &ReedSolomonCache,
     stats: &mut ProcessShredsStats,
+    is_virtual: bool,
 ) -> Result<Vec<Shred>, Error> {
     let now = Instant::now();
     let entries = bincode::serialize(entries)?;
@@ -875,6 +898,8 @@ pub(crate) fn make_merkle_shreds_from_entries(
         &entries[..],
         slot,
         parent_slot,
+        t_slot,
+        t_parent_slot,
         shred_version,
         reference_tick,
         is_last_in_slot,
@@ -882,6 +907,7 @@ pub(crate) fn make_merkle_shreds_from_entries(
         next_code_index,
         reed_solomon_cache,
         stats,
+        is_virtual
     )?;
     Ok(shreds.into_iter().flatten().map(Shred::from).collect())
 }
@@ -1060,6 +1086,8 @@ mod tests {
             index: u32::MAX,
             version: u16::MAX,
             fec_set_index: u32::MAX,
+            t_slot: Slot::MAX,
+            is_virtual: false,
         };
         let data_shred_header = DataShredHeader {
             parent_offset: u16::MAX,
@@ -1134,7 +1162,7 @@ mod tests {
 
     #[test]
     fn test_invalid_parent_offset() {
-        let shred = Shred::new_from_data(10, 0, 1000, &[1, 2, 3], ShredFlags::empty(), 0, 1, 0);
+        let shred = Shred::new_from_data(10, 0, 1000, &[1, 2, 3], ShredFlags::empty(), 0, 1, 0, 1, false);
         let mut packet = Packet::default();
         shred.copy_to_packet(&mut packet);
         let shred_res = Shred::new_from_serialized_shred(packet.data(..).unwrap().to_vec());
@@ -1170,6 +1198,8 @@ mod tests {
             0, // reference_tick
             shred_version,
             0, // fec_set_index
+            1,
+            false
         );
         shred.copy_to_packet(&mut packet);
         let mut stats = ShredFetchStats::default();
@@ -1247,6 +1277,8 @@ mod tests {
             4,   // num_code
             1,   // position
             shred_version,
+            1,
+            false,
         );
         shred.copy_to_packet(&mut packet);
         assert!(!should_discard_shred(
@@ -1267,6 +1299,8 @@ mod tests {
             0, // reference_tick
             shred_version,
             0, // fec_set_index
+            1,
+            false
         );
         shred.copy_to_packet(&mut packet);
         assert!(should_discard_shred(
@@ -1288,6 +1322,8 @@ mod tests {
             4,   // num_coding_shreds
             3,   // position
             shred_version,
+            1,
+            false,
         );
         shred.copy_to_packet(&mut packet);
         assert!(!should_discard_shred(
@@ -1535,6 +1571,8 @@ mod tests {
             37,    // reference_tick
             45189, // version
             28657, // fec_set_index
+            1,
+            false
         );
         shred.sign(&keypair);
         assert!(shred.verify(&keypair.pubkey()));
@@ -1572,6 +1610,8 @@ mod tests {
             49,    // reference_tick
             59445, // version
             21414, // fec_set_index
+            1,
+            false
         );
         shred.sign(&keypair);
         assert!(shred.verify(&keypair.pubkey()));
@@ -1608,6 +1648,8 @@ mod tests {
             58,    // num_coding_shreds
             43,    // position
             47298, // version
+            1,
+            false
         );
         shred.sign(&keypair);
         assert!(shred.verify(&keypair.pubkey()));
@@ -1645,6 +1687,8 @@ mod tests {
                 reference_tick,
                 0, // version
                 0, // fec_set_index
+                1,
+                false
             )
         }
         fn check_shred_flags(

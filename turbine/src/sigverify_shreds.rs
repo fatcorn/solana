@@ -302,6 +302,8 @@ mod tests {
             0,
             0,
             0xc0de,
+            0,
+            false,
         );
         shred.sign(&leader_keypair);
         batches[0][0].buffer_mut()[..shred.payload().len()].copy_from_slice(shred.payload());
@@ -316,6 +318,8 @@ mod tests {
             0,
             0,
             0xc0de,
+            0,
+            false,
         );
         let wrong_keypair = Keypair::new();
         shred.sign(&wrong_keypair);

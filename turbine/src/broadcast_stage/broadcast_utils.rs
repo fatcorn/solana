@@ -29,6 +29,10 @@ pub struct UnfinishedSlotInfo {
     pub(crate) next_code_index: u32,
     pub slot: Slot,
     pub parent: Slot,
+    pub t_next_shred_index: u32,
+    pub(crate) t_next_code_index: u32,
+    pub t_slot: Slot,
+    pub t_parent: Slot,
 }
 
 pub(super) fn recv_slot_entries(receiver: &Receiver<WorkingBankEntry>) -> Result<ReceiveResults> {
