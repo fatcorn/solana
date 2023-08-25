@@ -158,7 +158,7 @@ impl Shredder {
                 ShredFlags::DATA_COMPLETE_SHRED
             };
             // todo, if the shred is truly shred, parent offset from t_slot, add by jesse
-            let parent_offset = self.slot - self.parent_slot;
+            let parent_offset = if is_virtual { self.slot - self.parent_slot } else { self.t_slot - self.t_parent_slot };
             let mut shred = Shred::new_from_data(
                 self.slot,
                 shred_index,

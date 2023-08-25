@@ -84,10 +84,10 @@ impl StandardBroadcastRun {
                 let reference_tick = max_ticks_in_slot & SHRED_TICK_REFERENCE_MASK;
                 // To do, add correct slot after UnfinishedSlotInfo complete, add by jesse
                 let shredder =
-                    Shredder::new(state.slot, state.parent, reference_tick, self.shred_version, 1, 0)
+                    Shredder::new(state.slot, state.parent, reference_tick, self.shred_version, state.slot, state.t_parent)
                         .unwrap();
                 let merkle_variant = should_use_merkle_variant(state.slot, cluster_type);
-                // todo virtual shred compute may async with truly slot
+                // todo try virtual shred compute async with truly slot
                 let (mut shreds, coding_shreds) = shredder.entries_to_shreds(
                     keypair,
                     &[],  // entries
@@ -99,17 +99,25 @@ impl StandardBroadcastRun {
                     stats,
                     true
                 );
-                let (mut t_shreds, t_coding_shreds) = shredder.entries_to_shreds(
-                    keypair,
-                    &[],  // entries
-                    true, // is_last_in_slot,
-                    state.t_next_shred_index,
-                    state.t_next_code_index,
-                    merkle_variant,
-                    &self.reed_solomon_cache,
-                    stats,
-                    false
-                );
+                // todo, only true slot has txs, it would generate the last shred
+                let mut t_shreds = vec![];
+                let mut t_coding_shreds = vec![];
+                if state.t_next_shred_index > 0 {
+                    let (t_shreds_in, t_coding_shreds_in) = shredder.entries_to_shreds(
+                        keypair,
+                        &[],  // entries
+                        true, // is_last_in_slot,
+                        state.t_next_shred_index,
+                        state.t_next_code_index,
+                        merkle_variant,
+                        &self.reed_solomon_cache,
+                        stats,
+                        false
+                    );
+                    t_shreds = t_shreds_in;
+                    t_coding_shreds = t_coding_shreds;
+                }
+
                 if merkle_variant {
                     stats.num_merkle_data_shreds += shreds.len() + t_shreds.len();
                     stats.num_merkle_coding_shreds += coding_shreds.len() + t_coding_shreds.len();
@@ -140,8 +148,8 @@ impl StandardBroadcastRun {
         (
             Vec<Shred>, // data shreds
             Vec<Shred>, // coding shreds
-            Vec<Shred>, // truly data shreds
-            Vec<Shred>, // truly coding shreds
+            Option<Vec<Shred>>, // truly data shreds
+            Option<Vec<Shred>>, // truly coding shreds
         ),
         BroadcastError,
     > {
@@ -162,7 +170,7 @@ impl StandardBroadcastRun {
                         process_stats.num_extant_slots += 1;
                         // This is a faulty situation that should not happen.
                         // Refrain from generating shreds for the slot.
-                        return Ok((Vec::default(), Vec::default(), Vec::default(), Vec::default()));
+                        return Ok((Vec::default(), Vec::default(), None, None));
                     }
                 }
                 (0u32, 0u32, 0u32, 0u32)
@@ -172,17 +180,24 @@ impl StandardBroadcastRun {
         let shredder =
             Shredder::new(slot, parent_slot, reference_tick, self.shred_version, t_slot, t_parent_slot).unwrap();
         let merkle_variant = should_use_merkle_variant(slot, cluster_type);
-        let (t_data_shreds, t_coding_shreds) = shredder.entries_to_shreds(
-            keypair,
-            &truly_entries,
-            is_slot_end,
-            t_next_shred_index,
-            t_next_code_index,
-            merkle_variant,
-            &self.reed_solomon_cache,
-            process_stats,
-            false
-        );
+        let mut t_data_shreds= None ;
+        let mut t_coding_shreds = None;
+        if !truly_entries.is_empty() {
+            let (t_data_shreds_inner, t_coding_shreds_inner) = shredder.entries_to_shreds(
+                keypair,
+                &truly_entries,
+                is_slot_end,
+                t_next_shred_index,
+                t_next_code_index,
+                merkle_variant,
+                &self.reed_solomon_cache,
+                process_stats,
+                false
+            );
+            t_data_shreds = Some(t_data_shreds_inner);
+            t_coding_shreds = Some(t_coding_shreds_inner);
+        }
+
         let (data_shreds, coding_shreds) = shredder.entries_to_shreds(
             keypair,
             &virtual_entries,
@@ -195,8 +210,10 @@ impl StandardBroadcastRun {
             true
         );
         if merkle_variant {
-            process_stats.num_merkle_data_shreds += data_shreds.len() + t_data_shreds.len();
-            process_stats.num_merkle_coding_shreds += coding_shreds.len() + t_coding_shreds.len();
+            let t_data_shreds_len = if t_data_shreds.is_some() { t_data_shreds.clone().unwrap().len()} else { 0 };
+            let t_coding_shreds_len = if t_coding_shreds.is_some() { t_coding_shreds.clone().unwrap().len()} else { 0 };
+            process_stats.num_merkle_data_shreds += data_shreds.len() + t_data_shreds_len;
+            process_stats.num_merkle_coding_shreds += coding_shreds.len() + t_coding_shreds_len;
         }
         let next_shred_index_compute = |data_shreds: &Vec<Shred>, code_shreds: &Vec<Shred>| -> std::result::Result<(u32, u32), BroadcastError> {
             let next_shred_index = match data_shreds.iter().map(Shred::index).max() {
@@ -218,7 +235,12 @@ impl StandardBroadcastRun {
         };
 
         let (next_shred_index, next_code_index) = next_shred_index_compute(&data_shreds, &coding_shreds)?;
-        let (t_next_shred_index, t_next_code_index) = next_shred_index_compute(&t_data_shreds, &t_coding_shreds)?;
+        let mut t_next_shred_index= 0;
+        let mut t_next_code_index = 0;
+        if t_data_shreds.is_some() && t_coding_shreds.is_some() {
+            (t_next_shred_index, t_next_code_index) = next_shred_index_compute(&t_data_shreds.clone().unwrap(), &t_coding_shreds.clone().unwrap())?;
+        }
+
 
         self.unfinished_slot = Some(UnfinishedSlotInfo {
             next_shred_index,
@@ -403,18 +425,24 @@ impl StandardBroadcastRun {
         blockstore_sender.send((coding_shreds, batch_info.clone()))?;
 
         // Send truly data shreds
-        let t_data_shreds = Arc::new(t_data_shreds);
-        debug_assert!(t_data_shreds.iter().all(|shred| shred.slot() == bank.slot()));
-        socket_sender.send((t_data_shreds.clone(), batch_info.clone()))?;
-        blockstore_sender.send((t_data_shreds, batch_info.clone()))?;
+        if t_data_shreds.is_some() {
+            let t_data_shreds = Arc::new(t_data_shreds.unwrap());
+            debug_assert!(t_data_shreds.iter().all(|shred| shred.slot() == bank.slot()));
+            socket_sender.send((t_data_shreds.clone(), batch_info.clone()))?;
+            blockstore_sender.send((t_data_shreds, batch_info.clone()))?;
+        }
+
 
         // Send truly coding shreds
-        let t_coding_shreds = Arc::new(t_coding_shreds);
-        debug_assert!(t_coding_shreds
-            .iter()
-            .all(|shred| shred.slot() == bank.slot()));
-        socket_sender.send((t_coding_shreds.clone(), batch_info.clone()))?;
-        blockstore_sender.send((t_coding_shreds, batch_info.clone()))?;
+        if t_coding_shreds.is_some() {
+            let t_coding_shreds = Arc::new(t_coding_shreds.unwrap());
+            debug_assert!(t_coding_shreds
+                .iter()
+                .all(|shred| shred.slot() == bank.slot()));
+            socket_sender.send((t_coding_shreds.clone(), batch_info.clone()))?;
+            blockstore_sender.send((t_coding_shreds, batch_info.clone()))?;
+        }
+
 
         coding_send_time.stop();
 
@@ -668,6 +696,10 @@ mod test {
             next_code_index: 17,
             slot,
             parent,
+            t_slot: 1,
+            t_parent: 0,
+            t_next_shred_index: 13,
+            t_next_code_index: 12
         });
         run.slot_broadcast_start = Some(Instant::now());
 
