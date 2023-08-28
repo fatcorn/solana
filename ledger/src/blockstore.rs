@@ -215,6 +215,8 @@ pub struct Blockstore {
     t_blocktime_cf: LedgerColumn<cf::TBlocktime>,
     t_block_height_cf: LedgerColumn<cf::TBlockHeight>,
     t_optimistic_slots_cf: LedgerColumn<cf::TOptimisticSlots>,
+    pub t_slots_stats: SlotsStats,
+    t_last_root: RwLock<Slot>,
 }
 
 pub struct IndexMetaWorkingSetEntry {
@@ -335,6 +337,14 @@ impl Blockstore {
             .unwrap_or(0);
         let last_root = RwLock::new(max_root);
 
+        // Get max root or 0 if it doesn't exist
+        let t_max_root = db
+            .iter::<cf::TRoot>(IteratorMode::End)?
+            .next()
+            .map(|(slot, _)| slot)
+            .unwrap_or(0);
+        let t_last_root = RwLock::new(t_max_root);
+
         // Get active transaction-status index or 0
         let active_transaction_status_index = db
             .iter::<cf::TransactionStatusIndex>(IteratorMode::Start)?
@@ -397,6 +407,8 @@ impl Blockstore {
             t_blocktime_cf,
             t_block_height_cf,
             t_optimistic_slots_cf,
+            t_slots_stats: SlotsStats::default(),
+            t_last_root
         };
         if initialize_transaction_status_index {
             blockstore.initialize_transaction_status_index()?;
@@ -495,8 +507,12 @@ impl Blockstore {
         false
     }
 
-    fn erasure_meta(&self, erasure_set: ErasureSetId) -> Result<Option<ErasureMeta>> {
-        self.erasure_meta_cf.get(erasure_set.store_key())
+    fn erasure_meta(&self, erasure_set: ErasureSetId, is_virtual: bool) -> Result<Option<ErasureMeta>> {
+        if is_virtual {
+            self.erasure_meta_cf.get(erasure_set.store_key())
+        } else {
+            self.t_erasure_meta_cf.get(erasure_set.store_key())
+        }
     }
 
     /// Check whether the specified slot is an orphan slot which does not
@@ -883,6 +899,11 @@ impl Blockstore {
         let mut index_working_set = HashMap::new();
         let mut duplicate_shreds = vec![];
 
+        // let mut t_erasure_metas = HashMap::new();
+        // let mut t_slot_meta_working_set = HashMap::new();
+        // let mut t_index_working_set = HashMap::new();
+        // let mut t_duplicate_shreds = vec![];
+
         metrics.num_shreds += shreds.len();
         let mut start = Measure::start("Shred insertion");
         let mut index_meta_time_us = 0;
@@ -1014,6 +1035,7 @@ impl Blockstore {
                 // Always collect recovered-shreds so that above insert code is
                 // executed even if retransmit-sender is None.
                 .collect();
+            // TODO, this place like send code shreds to other receive side, check in later, add by jesse.
             if !recovered_shreds.is_empty() {
                 if let Some(retransmit_sender) = retransmit_sender {
                     let _ = retransmit_sender.send(
@@ -1031,6 +1053,7 @@ impl Blockstore {
         let mut start = Measure::start("Shred recovery");
         // Handle chaining for the members of the slot_meta_working_set that were inserted into,
         // drop the others
+        // TODO, handle next write batch deal in next around. add by jesse
         self.handle_chaining(&mut write_batch, &mut slot_meta_working_set)?;
         start.stop();
         metrics.chaining_elapsed_us += start.as_us();
@@ -1212,11 +1235,17 @@ impl Blockstore {
         shred_source: ShredSource,
         metrics: &mut BlockstoreInsertionMetrics,
     ) -> bool {
-        let slot = shred.slot();
+        let slot= shred.indeed_slot();
+        let is_virtual = shred.is_virtual();
         let shred_index = u64::from(shred.index());
+        let (last_root, slots_stats) = if is_virtual {
+            (&self.last_root, &self.slots_stats)
+        } else {
+            (&self.t_last_root, &self.t_slots_stats)
+        };
 
         let index_meta_working_set_entry =
-            self.get_index_meta_entry(slot, index_working_set, index_meta_time_us);
+            self.get_index_meta_entry(slot, index_working_set, index_meta_time_us, is_virtual);
 
         let index_meta = &mut index_meta_working_set_entry.index;
 
@@ -1230,7 +1259,7 @@ impl Blockstore {
                 return false;
             }
 
-            if !Blockstore::should_insert_coding_shred(&shred, &self.last_root) {
+            if !Blockstore::should_insert_coding_shred(&shred, last_root) {
                 metrics.num_coding_shreds_invalid += 1;
                 return false;
             }
@@ -1238,7 +1267,7 @@ impl Blockstore {
 
         let erasure_set = shred.erasure_set();
         let erasure_meta = erasure_metas.entry(erasure_set).or_insert_with(|| {
-            self.erasure_meta(erasure_set)
+            self.erasure_meta(erasure_set, is_virtual)
                 .expect("Expect database get to succeed")
                 .unwrap_or_else(|| ErasureMeta::from_coding_shred(&shred).unwrap())
         });
@@ -1259,6 +1288,7 @@ impl Blockstore {
                         slot,
                         conflicting_shred,
                         shred.payload().clone(),
+                        is_virtual
                     )
                     .is_err()
                 {
@@ -1276,15 +1306,15 @@ impl Blockstore {
                 slot,
                 shred.index(),
                 erasure_set,
-                self.has_duplicate_shreds_in_slot(slot),
+                self.has_duplicate_shreds_in_slot(slot, is_virtual),
                 erasure_meta.config(),
                 shred,
             );
             return false;
         }
 
-        self.slots_stats
-            .record_shred(shred.slot(), shred.fec_set_index(), shred_source, None);
+        slots_stats
+            .record_shred(shred.indeed_slot(), shred.fec_set_index(), shred_source, None);
 
         // insert coding shred into rocks
         let result = self
@@ -1313,8 +1343,9 @@ impl Blockstore {
     ) -> Option<Vec<u8>> {
         // Search for the shred which set the initial erasure config, either inserted,
         // or in the current batch in just_received_shreds.
+        let is_virtual = shred.is_virtual();
         for coding_index in erasure_meta.coding_shreds_indices() {
-            let maybe_shred = self.get_coding_shred(slot, coding_index);
+            let maybe_shred = self.get_coding_shred(slot, coding_index, is_virtual);
             if let Ok(Some(shred_data)) = maybe_shred {
                 let potential_shred = Shred::new_from_serialized_shred(shred_data).unwrap();
                 if shred.erasure_mismatch(&potential_shred).unwrap() {
@@ -1384,18 +1415,22 @@ impl Blockstore {
         leader_schedule: Option<&LeaderScheduleCache>,
         shred_source: ShredSource,
     ) -> std::result::Result<Vec<CompletedDataSetInfo>, InsertDataShredError> {
-        let slot = shred.slot();
+        let is_virtual = shred.is_virtual();
+        let slot = shred.indeed_slot();
         let shred_index = u64::from(shred.index());
 
+        // todo, index_working_set should be index_working_set or t_index_working_set, later finish, add by jesse
         let index_meta_working_set_entry =
-            self.get_index_meta_entry(slot, index_working_set, index_meta_time_us);
+            self.get_index_meta_entry(slot, index_working_set, index_meta_time_us, is_virtual);
         let index_meta = &mut index_meta_working_set_entry.index;
+        // todo, deal slot_meta_working_set same with above index_working_set, add by jesse
         let slot_meta_entry = self.get_slot_meta_entry(
             slot_meta_working_set,
             slot,
             shred
                 .parent()
                 .map_err(|_| InsertDataShredError::InvalidShred)?,
+            is_virtual,
         );
 
         let slot_meta = &mut slot_meta_entry.new_slot_meta.borrow_mut();
@@ -1417,7 +1452,11 @@ impl Blockstore {
                 // replayed entries past the newly detected "last" shred, then mark the slot as dead
                 // and wait for replay to dump and repair the correct version.
                 warn!("Received *last* shred index {} less than previous shred index {}, and slot {} is not full, marking slot dead", shred_index, slot_meta.received, slot);
-                write_batch.put::<cf::DeadSlots>(slot, &true).unwrap();
+                if is_virtual {
+                    write_batch.put::<cf::DeadSlots>(slot, &true).unwrap();
+                } else {
+                    write_batch.put::<cf::TDeadSlots>(slot, &true).unwrap();
+                };
             }
 
             if !self.should_insert_data_shred(
@@ -1444,7 +1483,7 @@ impl Blockstore {
         index_meta_working_set_entry.did_insert_occur = true;
         slot_meta_entry.did_insert_occur = true;
         if let HashMapEntry::Vacant(entry) = erasure_metas.entry(erasure_set) {
-            if let Some(meta) = self.erasure_meta(erasure_set).unwrap() {
+            if let Some(meta) = self.erasure_meta(erasure_set, is_virtual).unwrap() {
                 entry.insert(meta);
             }
         }
@@ -1453,7 +1492,7 @@ impl Blockstore {
 
     fn should_insert_coding_shred(shred: &Shred, last_root: &RwLock<u64>) -> bool {
         debug_assert_matches!(shred.sanitize(), Ok(()));
-        shred.is_code() && shred.slot() > *last_root.read().unwrap()
+        shred.is_code() && shred.indeed_slot() > *last_root.read().unwrap()
     }
 
     fn insert_coding_shred(
@@ -1462,7 +1501,8 @@ impl Blockstore {
         shred: &Shred,
         write_batch: &mut WriteBatch,
     ) -> Result<()> {
-        let slot = shred.slot();
+        let slot = shred.indeed_slot();
+        let is_virtual = shred.is_virtual();
         let shred_index = u64::from(shred.index());
 
         // Assert guaranteed by integrity checks on the shred that happen before
@@ -1472,7 +1512,12 @@ impl Blockstore {
 
         // Commit step: commit all changes to the mutable structures at once, or none at all.
         // We don't want only a subset of these changes going through.
-        write_batch.put_bytes::<cf::ShredCode>((slot, shred_index), shred.payload())?;
+        if is_virtual {
+            write_batch.put_bytes::<cf::ShredCode>((slot, shred_index), shred.payload())?;
+        } else {
+            write_batch.put_bytes::<cf::TShredCode>((slot, shred_index), shred.payload())?;
+        }
+
         index_meta.coding_mut().insert(shred_index);
 
         Ok(())
@@ -1489,6 +1534,7 @@ impl Blockstore {
         just_inserted_shreds: &'a HashMap<ShredId, Shred>,
         slot: Slot,
         index: u64,
+        is_virtual: bool,
     ) -> Cow<'a, Vec<u8>> {
         let key = ShredId::new(slot, u32::try_from(index).unwrap(), ShredType::Data);
         if let Some(shred) = just_inserted_shreds.get(&key) {
@@ -1496,7 +1542,7 @@ impl Blockstore {
         } else {
             // If it doesn't exist in the just inserted set, it must exist in
             // the backing store
-            Cow::Owned(self.get_data_shred(slot, index).unwrap().unwrap())
+            Cow::Owned(self.get_data_shred(slot, index, is_virtual).unwrap().unwrap())
         }
     }
 
@@ -1510,7 +1556,8 @@ impl Blockstore {
         shred_source: ShredSource,
     ) -> bool {
         let shred_index = u64::from(shred.index());
-        let slot = shred.slot();
+        let is_virtual = shred.is_virtual();
+        let slot = shred.indeed_slot();
         let last_in_slot = if shred.last_in_slot() {
             debug!("got last in slot");
             true
@@ -1529,6 +1576,7 @@ impl Blockstore {
                 just_inserted_shreds,
                 slot,
                 last_index.unwrap(),
+                is_virtual,
             );
 
             if self
@@ -1536,6 +1584,7 @@ impl Blockstore {
                     slot,
                     ending_shred.into_owned(),
                     shred.payload().clone(),
+                    is_virtual
                 )
                 .is_err()
             {
@@ -1564,6 +1613,7 @@ impl Blockstore {
                 just_inserted_shreds,
                 slot,
                 slot_meta.received - 1,
+                is_virtual,
             );
 
             if self
@@ -1571,6 +1621,7 @@ impl Blockstore {
                     slot,
                     ending_shred.into_owned(),
                     shred.payload().clone(),
+                    is_virtual,
                 )
                 .is_err()
             {
@@ -1622,7 +1673,8 @@ impl Blockstore {
         write_batch: &mut WriteBatch,
         shred_source: ShredSource,
     ) -> Result<Vec<CompletedDataSetInfo>> {
-        let slot = shred.slot();
+        let is_virtual = shred.is_virtual();
+        let slot = shred.indeed_slot();
         let index = u64::from(shred.index());
 
         let last_in_slot = if shred.last_in_slot() {
@@ -1655,7 +1707,12 @@ impl Blockstore {
 
         // Commit step: commit all changes to the mutable structures at once, or none at all.
         // We don't want only a subset of these changes going through.
-        write_batch.put_bytes::<cf::ShredData>((slot, index), shred.bytes_to_store())?;
+        if is_virtual {
+            write_batch.put_bytes::<cf::ShredData>((slot, index), shred.bytes_to_store())?;
+        } else {
+            write_batch.put_bytes::<cf::TShredData>((slot, index), shred.bytes_to_store())?;
+        }
+
         data_index.insert(index);
         let newly_completed_data_sets = update_slot_meta(
             last_in_slot,
@@ -1674,14 +1731,17 @@ impl Blockstore {
         })
         .collect();
 
-        self.slots_stats.record_shred(
-            shred.slot(),
+        // todo, slots_stats use related slot meta, so add t_slot_stats for record for now, add by jesse
+        let slot_stats = if is_virtual { &self.slots_stats } else { &self.t_slots_stats };
+        slot_stats.record_shred(
+            shred.indeed_slot(),
             shred.fec_set_index(),
             shred_source,
             Some(slot_meta),
         );
 
         // slot is full, send slot full timing to poh_timing_report service.
+        // todo, check if need send is_virtual args for later, add by jesse
         if slot_meta.is_full() {
             self.send_slot_full_timing(slot);
         }
@@ -1690,9 +1750,13 @@ impl Blockstore {
 
         Ok(newly_completed_data_sets)
     }
-
-    pub fn get_data_shred(&self, slot: Slot, index: u64) -> Result<Option<Vec<u8>>> {
-        let shred = self.data_shred_cf.get_bytes((slot, index))?;
+    // todo, solve the other place invoke input args problem, add by jesse
+    pub fn get_data_shred(&self, slot: Slot, index: u64, is_virtual: bool) -> Result<Option<Vec<u8>>> {
+        let shred = if is_virtual {
+            self.data_shred_cf.get_bytes((slot, index))?
+        } else {
+            self.t_data_shred_cf.get_bytes((slot, index))?
+        };
         let shred = shred.map(ShredData::resize_stored_shred).transpose();
         shred.map_err(|err| {
             let err = format!("Invalid stored shred: {err}");
@@ -1754,8 +1818,13 @@ impl Blockstore {
         Ok((last_index, buffer_offset))
     }
 
-    pub fn get_coding_shred(&self, slot: Slot, index: u64) -> Result<Option<Vec<u8>>> {
-        self.code_shred_cf.get_bytes((slot, index))
+    pub fn get_coding_shred(&self, slot: Slot, index: u64, is_virtual: bool) -> Result<Option<Vec<u8>>> {
+        if is_virtual {
+            self.code_shred_cf.get_bytes((slot, index))
+        } else {
+            self.t_code_shred_cf.get_bytes((slot, index))
+        }
+
     }
 
     pub fn get_coding_shreds_for_slot(
@@ -3276,9 +3345,10 @@ impl Blockstore {
         slot: Slot,
         shred1: Vec<u8>,
         shred2: Vec<u8>,
+        is_virtual: bool,
     ) -> Result<()> {
-        if !self.has_duplicate_shreds_in_slot(slot) {
-            self.store_duplicate_slot(slot, shred1, shred2)
+        if !self.has_duplicate_shreds_in_slot(slot, is_virtual) {
+            self.store_duplicate_slot(slot, shred1, shred2, is_virtual)
         } else {
             Ok(())
         }
@@ -3293,9 +3363,14 @@ impl Blockstore {
             .map(|(slot, proof_bytes)| (slot, deserialize(&proof_bytes).unwrap()))
     }
 
-    pub fn store_duplicate_slot(&self, slot: Slot, shred1: Vec<u8>, shred2: Vec<u8>) -> Result<()> {
+    pub fn store_duplicate_slot(&self, slot: Slot, shred1: Vec<u8>, shred2: Vec<u8>, is_virtual: bool) -> Result<()> {
+
         let duplicate_slot_proof = DuplicateSlotProof::new(shred1, shred2);
-        self.duplicate_slots_cf.put(slot, &duplicate_slot_proof)
+        if is_virtual {
+            self.duplicate_slots_cf.put(slot, &duplicate_slot_proof)
+        } else {
+            self.t_duplicate_slots_cf.put(slot, &duplicate_slot_proof)
+        }
     }
 
     pub fn get_duplicate_slot(&self, slot: u64) -> Option<DuplicateSlotProof> {
@@ -3310,17 +3385,18 @@ impl Blockstore {
     // the same slot and index
     pub fn is_shred_duplicate(&self, new_shred: &Shred) -> Option<Vec<u8>> {
         let (slot, index, shred_type) = new_shred.id().unpack();
+        let is_virtual = new_shred.is_virtual();
         let existing_shred = match shred_type {
-            ShredType::Data => self.get_data_shred(slot, index as u64),
-            ShredType::Code => self.get_coding_shred(slot, index as u64),
+            ShredType::Data => self.get_data_shred(slot, index as u64, is_virtual),
+            ShredType::Code => self.get_coding_shred(slot, index as u64, is_virtual),
         }
         .expect("fetch from DuplicateSlots column family failed")?;
         (existing_shred != *new_shred.payload()).then_some(existing_shred)
     }
 
-    pub fn has_duplicate_shreds_in_slot(&self, slot: Slot) -> bool {
-        self.duplicate_slots_cf
-            .get(slot)
+    pub fn has_duplicate_shreds_in_slot(&self, slot: Slot, is_virtual: bool) -> bool {
+        let duplicate_slots_proof = if is_virtual { self.duplicate_slots_cf.get(slot) } else { self.t_duplicate_slots_cf.get(slot) };
+        duplicate_slots_proof
             .expect("fetch from DuplicateSlots column family failed")
             .is_some()
     }
@@ -3742,13 +3818,13 @@ impl Blockstore {
         slot_meta_working_set: &'a mut HashMap<u64, SlotMetaWorkingSetEntry>,
         slot: Slot,
         parent_slot: Slot,
+        is_virtual: bool,
     ) -> &'a mut SlotMetaWorkingSetEntry {
         // Check if we've already inserted the slot metadata for this shred's slot
         slot_meta_working_set.entry(slot).or_insert_with(|| {
+            let slot_meta = if is_virtual { self.meta_cf.get(slot) } else { self.t_meta_cf.get(slot)};
             // Store a 2-tuple of the metadata (working copy, backup copy)
-            if let Some(mut meta) = self
-                .meta_cf
-                .get(slot)
+            if let Some(mut meta) = slot_meta
                 .expect("Expect database get to succeed")
             {
                 let backup = Some(meta.clone());
@@ -3820,14 +3896,23 @@ impl Blockstore {
         slot: Slot,
         index_working_set: &'a mut HashMap<u64, IndexMetaWorkingSetEntry>,
         index_meta_time_us: &mut u64,
+        is_virtual: bool,
     ) -> &'a mut IndexMetaWorkingSetEntry {
         let mut total_start = Measure::start("Total elapsed");
         let res = index_working_set.entry(slot).or_insert_with(|| {
-            let newly_inserted_meta = self
-                .index_cf
-                .get(slot)
-                .unwrap()
-                .unwrap_or_else(|| Index::new(slot));
+            let newly_inserted_meta= if is_virtual {
+                self
+                    .index_cf
+                    .get(slot)
+                    .unwrap()
+                    .unwrap_or_else(|| Index::new(slot))
+            } else {
+                self
+                    .t_index_cf
+                    .get(slot)
+                    .unwrap()
+                    .unwrap_or_else(|| Index::new(slot))
+            };
             IndexMetaWorkingSetEntry {
                 index: newly_inserted_meta,
                 did_insert_occur: false,

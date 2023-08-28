@@ -125,11 +125,13 @@ impl DuplicateShredHandler {
                 .slot_leader_at(slot, /*bank:*/ None)
                 .ok_or(Error::UnknownSlotLeader(slot))?;
             let (shred1, shred2) = duplicate_shred::into_shreds(&pubkey, chunks)?;
-            if !self.blockstore.has_duplicate_shreds_in_slot(slot) {
+            // todo, important, the is_virtual should input from outside func, add by jesse
+            if !self.blockstore.has_duplicate_shreds_in_slot(slot, false) {
                 self.blockstore.store_duplicate_slot(
                     slot,
                     shred1.into_payload(),
                     shred2.into_payload(),
+                    false
                 )?;
             }
             self.consumed.insert(slot, true);
@@ -200,7 +202,8 @@ fn should_consume_slot(
 ) -> bool {
     !*consumed
         .entry(slot)
-        .or_insert_with(|| blockstore.has_duplicate_shreds_in_slot(slot))
+        // todo, important, is_virtual may input for outside func, add by jesse.
+        .or_insert_with(|| blockstore.has_duplicate_shreds_in_slot(slot, false))
 }
 
 #[cfg(test)]

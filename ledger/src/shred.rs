@@ -439,6 +439,15 @@ impl Shred {
         self.common_header().t_slot
     }
 
+    pub fn indeed_slot(&self) -> Slot {
+        if self.is_virtual() {
+            self.common_header().slot
+        } else {
+            self.common_header().t_slot
+        }
+    }
+
+
     pub fn is_virtual(&self) -> bool {
         self.common_header().is_virtual
     }
@@ -487,7 +496,7 @@ impl Shred {
 
     // Identifier for the erasure coding set that the shred belongs to.
     pub(crate) fn erasure_set(&self) -> ErasureSetId {
-        ErasureSetId(self.slot(), self.fec_set_index())
+        ErasureSetId(self.indeed_slot(), self.fec_set_index())
     }
 
     pub fn signature(&self) -> &Signature {

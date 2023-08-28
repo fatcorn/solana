@@ -638,6 +638,20 @@ impl Rocks {
             BlockHeight::NAME,
             ProgramCosts::NAME,
             OptimisticSlots::NAME,
+            // Truly slot column name
+            TErasureMeta::NAME,
+            TDeadSlots::NAME,
+            TDuplicateSlots::NAME,
+            TIndex::NAME,
+            TOrphans::NAME,
+            TRoot::NAME,
+            TSlotMeta::NAME,
+            TShredData::NAME,
+            TShredCode::NAME,
+            TTransactionStatus::NAME,
+            TBlocktime::NAME,
+            TBlockHeight::NAME,
+            TOptimisticSlots::NAME,
         ]
     }
 

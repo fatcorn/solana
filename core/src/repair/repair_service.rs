@@ -606,10 +606,11 @@ impl RepairService {
             vec![]
         } else if slot_meta.consumed == slot_meta.received {
             // check delay time of last shred
+            // todo, important, the is_virtual should input from outside func, or the slot_meta should add the is_virtual var, add by jesse
             if let Some(reference_tick) = slot_meta
                 .received
                 .checked_sub(1)
-                .and_then(|index| blockstore.get_data_shred(slot, index).ok()?)
+                .and_then(|index| blockstore.get_data_shred(slot, index, false).ok()?)
                 .and_then(|shred| shred::layout::get_reference_tick(&shred).ok())
                 .map(u64::from)
             {

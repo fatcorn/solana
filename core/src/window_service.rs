@@ -142,14 +142,16 @@ fn run_check_duplicate(
     duplicate_slots_sender: &DuplicateSlotSender,
 ) -> Result<()> {
     let check_duplicate = |shred: Shred| -> Result<()> {
-        let shred_slot = shred.slot();
-        if !blockstore.has_duplicate_shreds_in_slot(shred_slot) {
+        let shred_slot = shred.indeed_slot();
+        let is_virtual = shred.is_virtual();
+        if !blockstore.has_duplicate_shreds_in_slot(shred_slot, is_virtual) {
             if let Some(existing_shred_payload) = blockstore.is_shred_duplicate(&shred) {
                 cluster_info.push_duplicate_shred(&shred, &existing_shred_payload)?;
                 blockstore.store_duplicate_slot(
                     shred_slot,
                     existing_shred_payload,
                     shred.into_payload(),
+                    is_virtual,
                 )?;
 
                 duplicate_slots_sender.send(shred_slot)?;
