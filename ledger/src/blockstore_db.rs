@@ -62,27 +62,50 @@ const PERIODIC_COMPACTION_SECONDS: u64 = 60 * 60 * 24;
 
 // Column family for metadata about a leader slot
 const META_CF: &str = "meta";
+// Column family for metadata about a leader truly slot
+const T_META_CF: &str = "t_meta";
 // Column family for slots that have been marked as dead
 const DEAD_SLOTS_CF: &str = "dead_slots";
+// Column family for truly slots that have been marked as dead
+const T_DEAD_SLOTS_CF: &str = "t_dead_slots";
 // Column family for storing proof that there were multiple
 // versions of a slot
 const DUPLICATE_SLOTS_CF: &str = "duplicate_slots";
+// Column family for storing proof that there were multiple
+// versions of a truly slot
+const T_DUPLICATE_SLOTS_CF: &str = "t_duplicate_slots";
 // Column family storing erasure metadata for a slot
 const ERASURE_META_CF: &str = "erasure_meta";
+// Column family storing erasure metadata for a truly slot
+const T_ERASURE_META_CF: &str = "t_erasure_meta";
 // Column family for orphans data
 const ORPHANS_CF: &str = "orphans";
+
+// Column family for truly orphans data
+const T_ORPHANS_CF: &str = "t_orphans";
 /// Column family for bank hashes
 const BANK_HASH_CF: &str = "bank_hashes";
 // Column family for root data
 const ROOT_CF: &str = "root";
+// Column family for truly root data
+const T_ROOT_CF: &str = "t_root";
 /// Column family for indexes
 const INDEX_CF: &str = "index";
+/// Column family for truly indexes
+const T_INDEX_CF: &str = "t_index";
 /// Column family for Data Shreds
 pub const DATA_SHRED_CF: &str = "data_shred";
+/// Column family for truly Data Shreds
+pub const T_DATA_SHRED_CF: &str = "t_data_shred";
 /// Column family for Code Shreds
 const CODE_SHRED_CF: &str = "code_shred";
+/// Column family for truly Code Shreds
+const T_CODE_SHRED_CF: &str = "t_code_shred";
 /// Column family for Transaction Status
 const TRANSACTION_STATUS_CF: &str = "transaction_status";
+
+/// Column family for Truly Transaction Status
+const T_TRANSACTION_STATUS_CF: &str = "t_transaction_status";
 /// Column family for Address Signatures
 const ADDRESS_SIGNATURES_CF: &str = "address_signatures";
 /// Column family for TransactionMemos
@@ -95,14 +118,20 @@ const TRANSACTION_STATUS_INDEX_CF: &str = "transaction_status_index";
 const REWARDS_CF: &str = "rewards";
 /// Column family for Blocktime
 const BLOCKTIME_CF: &str = "blocktime";
+/// Column family for truly Blocktime
+const T_BLOCKTIME_CF: &str = "t_blocktime";
 /// Column family for Performance Samples
 const PERF_SAMPLES_CF: &str = "perf_samples";
 /// Column family for BlockHeight
 const BLOCK_HEIGHT_CF: &str = "block_height";
+/// Column family for truly BlockHeight
+const T_BLOCK_HEIGHT_CF: &str = "t_block_height";
 /// Column family for ProgramCosts
 const PROGRAM_COSTS_CF: &str = "program_costs";
 /// Column family for optimistic slots
 const OPTIMISTIC_SLOTS_CF: &str = "optimistic_slots";
+/// Column family for optimistic truly slots
+const T_OPTIMISTIC_SLOTS_CF: &str = "t_optimistic_slots";
 
 #[derive(Error, Debug)]
 pub enum BlockstoreError {
@@ -159,6 +188,17 @@ pub mod columns {
     pub struct SlotMeta;
 
     #[derive(Debug)]
+    /// The truly slot metadata column.
+    ///
+    /// This column family tracks the status of the received shred data for a
+    /// given slot.  Tracking the progress as the slot fills up allows us to
+    /// know if the slot (or pieces of the slot) are ready to be replayed.
+    ///
+    /// * index type: `u64` (see [`SlotColumn`])
+    /// * value type: [`blockstore_meta::SlotMeta`]
+    pub struct TSlotMeta;
+
+    #[derive(Debug)]
     /// The orphans column.
     ///
     /// This column family tracks whether a slot has a parent.  Slots without a
@@ -169,6 +209,18 @@ pub mod columns {
     /// * index type: `u64` (see [`SlotColumn`])
     /// * value type: `bool`
     pub struct Orphans;
+
+    #[derive(Debug)]
+    /// The truly orphans column.
+    ///
+    /// This column family tracks whether a slot has a parent.  Slots without a
+    /// parent are by definition orphan slots.  Orphans will have an entry in
+    /// this column family with true value.  Once an orphan slot has a parent,
+    /// its entry in this column will be deleted.
+    ///
+    /// * index type: `u64` (see [`SlotColumn`])
+    /// * value type: `bool`
+    pub struct TOrphans;
 
     #[derive(Debug)]
     /// The dead slots column.
@@ -187,11 +239,34 @@ pub mod columns {
     pub struct DeadSlots;
 
     #[derive(Debug)]
+    /// The dead truly slots column.
+    /// This column family tracks whether a slot is dead.
+    ///
+    /// A slot is marked as dead if the validator thinks it will never be able
+    /// to successfully replay this slot.  Example scenarios include errors
+    /// during the replay of a slot, or the validator believes it will never
+    /// receive all the shreds of a slot.
+    ///
+    /// If a slot has been mistakenly marked as dead, the ledger-tool's
+    /// --remove-dead-slot can unmark a dead slot.
+    ///
+    /// * index type: `u64` (see [`SlotColumn`])
+    /// * value type: `bool`
+    pub struct TDeadSlots;
+
+    #[derive(Debug)]
     /// The duplicate slots column
     ///
     /// * index type: `u64` (see [`SlotColumn`])
     /// * value type: [`blockstore_meta::DuplicateSlotProof`]
     pub struct DuplicateSlots;
+
+    #[derive(Debug)]
+    /// The truly duplicate slots column
+    ///
+    /// * index type: `u64` (see [`SlotColumn`])
+    /// * value type: [`blockstore_meta::DuplicateSlotProof`]
+    pub struct TDuplicateSlots;
 
     #[derive(Debug)]
     /// The erasure meta column.
@@ -206,6 +281,20 @@ pub mod columns {
     /// * index type: `crate::shred::ErasureSetId` `(Slot, fec_set_index: u64)`
     /// * value type: [`blockstore_meta::ErasureMeta`]
     pub struct ErasureMeta;
+
+    #[derive(Debug)]
+    /// The truly erasure meta column.
+    ///
+    /// This column family stores ErasureMeta which includes metadata about
+    /// dropped network packets (or erasures) that can be used to recover
+    /// missing data shreds.
+    ///
+    /// Its index type is `crate::shred::ErasureSetId`, which consists of a Slot ID
+    /// and a FEC (Forward Error Correction) set index.
+    ///
+    /// * index type: `crate::shred::ErasureSetId` `(Slot, fec_set_index: u64)`
+    /// * value type: [`blockstore_meta::ErasureMeta`]
+    pub struct TErasureMeta;
 
     #[derive(Debug)]
     /// The bank hash column.
@@ -233,11 +322,28 @@ pub mod columns {
     pub struct Root;
 
     #[derive(Debug)]
+    /// The truly root column.
+    ///
+    /// This column family persists whether a slot is a root.  Slots on the
+    /// main fork will be inserted into this column when they are finalized.
+    ///
+    /// * index type: `u64` (see [`SlotColumn`])
+    /// * value type: `bool`
+    pub struct TRoot;
+
+    #[derive(Debug)]
     /// The index column
     ///
     /// * index type: `u64` (see [`SlotColumn`])
     /// * value type: [`blockstore_meta::Index`]
     pub struct Index;
+
+    #[derive(Debug)]
+    /// The truly index column
+    ///
+    /// * index type: `u64` (see [`SlotColumn`])
+    /// * value type: [`blockstore_meta::Index`]
+    pub struct TIndex;
 
     #[derive(Debug)]
     /// The shred data column
@@ -247,6 +353,13 @@ pub mod columns {
     pub struct ShredData;
 
     #[derive(Debug)]
+    /// The truly shred data column
+    ///
+    /// * index type: `(u64, u64)`
+    /// * value type: [`Vec<u8>`]
+    pub struct TShredData;
+
+    #[derive(Debug)]
     /// The shred erasure code column
     ///
     /// * index type: `(u64, u64)`
@@ -254,11 +367,25 @@ pub mod columns {
     pub struct ShredCode;
 
     #[derive(Debug)]
+    /// The truly shred erasure code column
+    ///
+    /// * index type: `(u64, u64)`
+    /// * value type: [`Vec<u8>`]
+    pub struct TShredCode;
+
+    #[derive(Debug)]
     /// The transaction status column
     ///
     /// * index type: `(u64, `[`Signature`]`, `[`Slot`])`
     /// * value type: [`generated::TransactionStatusMeta`]
     pub struct TransactionStatus;
+
+    #[derive(Debug)]
+    /// The truly transaction status column
+    ///
+    /// * index type: `(u64, `[`Signature`]`, `[`Slot`])`
+    /// * value type: [`generated::TransactionStatusMeta`]
+    pub struct TTransactionStatus;
 
     #[derive(Debug)]
     /// The address signatures column
@@ -296,6 +423,13 @@ pub mod columns {
     pub struct Blocktime;
 
     #[derive(Debug)]
+    /// The truly blocktime column
+    ///
+    /// * index type: `u64` (see [`SlotColumn`])
+    /// * value type: [`UnixTimestamp`]
+    pub struct TBlocktime;
+
+    #[derive(Debug)]
     /// The performance samples column
     ///
     /// * index type: `u64` (see [`SlotColumn`])
@@ -310,6 +444,13 @@ pub mod columns {
     pub struct BlockHeight;
 
     #[derive(Debug)]
+    /// The truly block height column
+    ///
+    /// * index type: `u64` (see [`SlotColumn`])
+    /// * value type: `u64`
+    pub struct TBlockHeight;
+
+    #[derive(Debug)]
     /// The program costs column
     ///
     /// * index type: [`Pubkey`]
@@ -322,6 +463,13 @@ pub mod columns {
     /// * index type: `u64` (see [`SlotColumn`])
     /// * value type: [`blockstore_meta::OptimisticSlotMetaVersioned`]
     pub struct OptimisticSlots;
+
+    #[derive(Debug)]
+    /// The truly optimistic slot column
+    ///
+    /// * index type: `u64` (see [`SlotColumn`])
+    /// * value type: [`blockstore_meta::OptimisticSlotMetaVersioned`]
+    pub struct TOptimisticSlots;
 
     // When adding a new column ...
     // - Add struct below and implement `Column` and `ColumnName` traits
@@ -426,27 +574,43 @@ impl Rocks {
 
         let (cf_descriptor_shred_data, cf_descriptor_shred_code) =
             new_cf_descriptor_pair_shreds::<ShredData, ShredCode>(options, oldest_slot);
+        let (cf_descriptor_t_shred_data, cf_descriptor_t_shred_code) =
+            new_cf_descriptor_pair_shreds::<TShredData, TShredCode>(options, oldest_slot);
         vec![
             new_cf_descriptor::<SlotMeta>(options, oldest_slot),
             new_cf_descriptor::<DeadSlots>(options, oldest_slot),
             new_cf_descriptor::<DuplicateSlots>(options, oldest_slot),
             new_cf_descriptor::<ErasureMeta>(options, oldest_slot),
             new_cf_descriptor::<Orphans>(options, oldest_slot),
-            new_cf_descriptor::<BankHash>(options, oldest_slot),
+            new_cf_descriptor::<BankHash>(options, oldest_slot), // without t_name for now
             new_cf_descriptor::<Root>(options, oldest_slot),
             new_cf_descriptor::<Index>(options, oldest_slot),
             cf_descriptor_shred_data,
             cf_descriptor_shred_code,
             new_cf_descriptor::<TransactionStatus>(options, oldest_slot),
-            new_cf_descriptor::<AddressSignatures>(options, oldest_slot),
-            new_cf_descriptor::<TransactionMemos>(options, oldest_slot),
-            new_cf_descriptor::<TransactionStatusIndex>(options, oldest_slot),
-            new_cf_descriptor::<Rewards>(options, oldest_slot),
+            new_cf_descriptor::<AddressSignatures>(options, oldest_slot), // without t_name
+            new_cf_descriptor::<TransactionMemos>(options, oldest_slot), // without t_name
+            new_cf_descriptor::<TransactionStatusIndex>(options, oldest_slot), // without t_name
+            new_cf_descriptor::<Rewards>(options, oldest_slot), // without t_name
             new_cf_descriptor::<Blocktime>(options, oldest_slot),
-            new_cf_descriptor::<PerfSamples>(options, oldest_slot),
+            new_cf_descriptor::<PerfSamples>(options, oldest_slot), // without t_name
             new_cf_descriptor::<BlockHeight>(options, oldest_slot),
-            new_cf_descriptor::<ProgramCosts>(options, oldest_slot),
+            new_cf_descriptor::<ProgramCosts>(options, oldest_slot), // without t_name
             new_cf_descriptor::<OptimisticSlots>(options, oldest_slot),
+            // truly slot cf
+            new_cf_descriptor::<TSlotMeta>(options, oldest_slot),
+            new_cf_descriptor::<TDeadSlots>(options, oldest_slot),
+            new_cf_descriptor::<TDuplicateSlots>(options, oldest_slot),
+            new_cf_descriptor::<TErasureMeta>(options, oldest_slot),
+            new_cf_descriptor::<TOrphans>(options, oldest_slot),
+            new_cf_descriptor::<TRoot>(options, oldest_slot),
+            new_cf_descriptor::<TIndex>(options, oldest_slot),
+            cf_descriptor_t_shred_data,
+            cf_descriptor_t_shred_code,
+            new_cf_descriptor::<TTransactionStatus>(options, oldest_slot),
+            new_cf_descriptor::<TBlocktime>(options, oldest_slot),
+            new_cf_descriptor::<TBlockHeight>(options, oldest_slot),
+            new_cf_descriptor::<TOptimisticSlots>(options, oldest_slot),
         ]
     }
 
@@ -1009,6 +1173,7 @@ impl TypedColumn for columns::Orphans {
     type Type = bool;
 }
 
+// Todo, not decide how to store truly bank hash, may depends on the two Bank Struct whether split, add by jesse
 impl SlotColumn for columns::BankHash {}
 impl ColumnName for columns::BankHash {
     const NAME: &'static str = BANK_HASH_CF;
@@ -1060,6 +1225,7 @@ impl Column for columns::ErasureMeta {
 }
 impl ColumnName for columns::ErasureMeta {
     const NAME: &'static str = ERASURE_META_CF;
+
 }
 impl TypedColumn for columns::ErasureMeta {
     type Type = blockstore_meta::ErasureMeta;
@@ -1068,9 +1234,222 @@ impl TypedColumn for columns::ErasureMeta {
 impl SlotColumn for columns::OptimisticSlots {}
 impl ColumnName for columns::OptimisticSlots {
     const NAME: &'static str = OPTIMISTIC_SLOTS_CF;
+
 }
 impl TypedColumn for columns::OptimisticSlots {
     type Type = blockstore_meta::OptimisticSlotMetaVersioned;
+}
+
+// Truly OptimisticSlots column
+impl SlotColumn for columns::TOptimisticSlots {}
+impl ColumnName for columns::TOptimisticSlots {
+    const NAME: &'static str = T_OPTIMISTIC_SLOTS_CF;
+
+}
+impl TypedColumn for columns::TOptimisticSlots {
+    type Type = blockstore_meta::OptimisticSlotMetaVersioned;
+}
+
+// // Truly ErasureMeta column
+impl Column for columns::TErasureMeta {
+    type Index = (Slot, u64);
+
+    fn index(key: &[u8]) -> (Slot, u64) {
+        let slot = BigEndian::read_u64(&key[..8]);
+        let set_index = BigEndian::read_u64(&key[8..]);
+
+        (slot, set_index)
+    }
+
+    fn key((slot, set_index): (Slot, u64)) -> Vec<u8> {
+        let mut key = vec![0; 16];
+        BigEndian::write_u64(&mut key[..8], slot);
+        BigEndian::write_u64(&mut key[8..], set_index);
+        key
+    }
+
+    fn primary_index(index: Self::Index) -> Slot {
+        index.0
+    }
+
+    fn as_index(slot: Slot) -> Self::Index {
+        (slot, 0)
+    }
+}
+impl ColumnName for columns::TErasureMeta {
+    const NAME: &'static str = T_ERASURE_META_CF;
+
+}
+impl TypedColumn for columns::TErasureMeta {
+    type Type = blockstore_meta::ErasureMeta;
+}
+
+// Truly SlotMeta column
+impl SlotColumn for columns::TSlotMeta {}
+impl ColumnName for columns::TSlotMeta {
+    const NAME: &'static str = T_META_CF;
+}
+impl TypedColumn for columns::TSlotMeta {
+    type Type = blockstore_meta::SlotMeta;
+}
+
+// Truly Root column
+impl SlotColumn for columns::TRoot {}
+impl ColumnName for columns::TRoot {
+    const NAME: &'static str = T_ROOT_CF;
+}
+impl TypedColumn for columns::TRoot {
+    type Type = bool;
+}
+
+// Truly Orphans column
+impl SlotColumn for columns::TOrphans {}
+impl ColumnName for columns::TOrphans {
+    const NAME: &'static str = T_ORPHANS_CF;
+}
+impl TypedColumn for columns::TOrphans {
+    type Type = bool;
+}
+
+// Truly DuplicateSlots column
+impl SlotColumn for columns::TDuplicateSlots {}
+impl ColumnName for columns::TDuplicateSlots {
+    const NAME: &'static str = T_DUPLICATE_SLOTS_CF;
+}
+impl TypedColumn for columns::TDuplicateSlots {
+    type Type = blockstore_meta::DuplicateSlotProof;
+}
+
+// Truly DeadSlots column
+impl SlotColumn for columns::TDeadSlots {}
+impl ColumnName for columns::TDeadSlots {
+    const NAME: &'static str = T_DEAD_SLOTS_CF;
+
+}
+impl TypedColumn for columns::TDeadSlots {
+    type Type = bool;
+}
+
+// Truly Index column
+impl SlotColumn for columns::TIndex {}
+impl ColumnName for columns::TIndex {
+    const NAME: &'static str = T_INDEX_CF;
+}
+impl TypedColumn for columns::TIndex {
+    type Type = blockstore_meta::Index;
+}
+
+// Truly ShredCode column
+impl Column for columns::TShredCode {
+    type Index = (Slot, u64);
+
+    fn key(index: (Slot, u64)) -> Vec<u8> {
+        columns::TShredData::key(index)
+    }
+
+    fn index(key: &[u8]) -> (Slot, u64) {
+        columns::TShredData::index(key)
+    }
+
+    fn primary_index(index: Self::Index) -> Slot {
+        index.0
+    }
+
+    fn as_index(slot: Slot) -> Self::Index {
+        (slot, 0)
+    }
+}
+impl ColumnName for columns::TShredCode {
+    const NAME: &'static str = T_CODE_SHRED_CF;
+}
+
+// Truly ShredData column
+impl Column for columns::TShredData {
+    type Index = (Slot, u64);
+
+    fn key((slot, index): (Slot, u64)) -> Vec<u8> {
+        let mut key = vec![0; 16];
+        BigEndian::write_u64(&mut key[..8], slot);
+        BigEndian::write_u64(&mut key[8..16], index);
+        key
+    }
+
+    fn index(key: &[u8]) -> (Slot, u64) {
+        let slot = BigEndian::read_u64(&key[..8]);
+        let index = BigEndian::read_u64(&key[8..16]);
+        (slot, index)
+    }
+
+    fn primary_index(index: Self::Index) -> Slot {
+        index.0
+    }
+
+    fn as_index(slot: Slot) -> Self::Index {
+        (slot, 0)
+    }
+}
+impl ColumnName for columns::TShredData {
+    const NAME: &'static str = T_DATA_SHRED_CF;
+}
+
+// Truly BlockHeight column
+impl SlotColumn for columns::TBlockHeight {}
+impl ColumnName for columns::TBlockHeight {
+    const NAME: &'static str = T_BLOCK_HEIGHT_CF;
+}
+impl TypedColumn for columns::TBlockHeight {
+    type Type = u64;
+}
+
+// Truly Blocktime column
+impl SlotColumn for columns::TBlocktime {}
+impl ColumnName for columns::TBlocktime {
+    const NAME: &'static str = T_BLOCKTIME_CF;
+}
+impl TypedColumn for columns::TBlocktime {
+    type Type = UnixTimestamp;
+}
+
+// Truly TransactionStatus column
+impl Column for columns::TTransactionStatus {
+    type Index = (u64, Signature, Slot);
+
+    fn key((index, signature, slot): (u64, Signature, Slot)) -> Vec<u8> {
+        let mut key = vec![0; 8 + 64 + 8]; // size_of u64 + size_of Signature + size_of Slot
+        BigEndian::write_u64(&mut key[0..8], index);
+        key[8..72].clone_from_slice(&signature.as_ref()[0..64]);
+        BigEndian::write_u64(&mut key[72..80], slot);
+        key
+    }
+
+    fn index(key: &[u8]) -> (u64, Signature, Slot) {
+        if key.len() != 80 {
+            Self::as_index(0)
+        } else {
+            let index = BigEndian::read_u64(&key[0..8]);
+            let signature = Signature::try_from(&key[8..72]).unwrap();
+            let slot = BigEndian::read_u64(&key[72..80]);
+            (index, signature, slot)
+        }
+    }
+
+    fn primary_index(index: Self::Index) -> u64 {
+        index.0
+    }
+
+    fn slot(index: Self::Index) -> Slot {
+        index.2
+    }
+
+    fn as_index(index: u64) -> Self::Index {
+        (index, Signature::default(), 0)
+    }
+}
+impl ColumnName for columns::TTransactionStatus {
+    const NAME: &'static str = T_TRANSACTION_STATUS_CF;
+}
+impl ProtobufColumn for columns::TTransactionStatus {
+    type Type = generated::TransactionStatusMeta;
 }
 
 #[derive(Debug)]
@@ -1721,6 +2100,7 @@ fn new_cf_descriptor<C: 'static + Column + ColumnName>(
     oldest_slot: &OldestSlot,
 ) -> ColumnFamilyDescriptor {
     ColumnFamilyDescriptor::new(C::NAME, get_cf_options::<C>(options, oldest_slot))
+
 }
 
 fn get_cf_options<C: 'static + Column + ColumnName>(

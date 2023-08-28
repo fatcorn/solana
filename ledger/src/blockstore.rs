@@ -201,6 +201,20 @@ pub struct Blockstore {
     pub shred_timing_point_sender: Option<PohTimingSender>,
     pub lowest_cleanup_slot: RwLock<Slot>,
     pub slots_stats: SlotsStats,
+    // truly slot cf
+    t_meta_cf: LedgerColumn<cf::TSlotMeta>,
+    t_dead_slots_cf: LedgerColumn<cf::TDeadSlots>,
+    t_duplicate_slots_cf: LedgerColumn<cf::TDuplicateSlots>,
+    t_roots_cf: LedgerColumn<cf::TRoot>,
+    t_erasure_meta_cf: LedgerColumn<cf::TErasureMeta>,
+    t_orphans_cf: LedgerColumn<cf::TOrphans>,
+    t_index_cf: LedgerColumn<cf::TIndex>,
+    t_data_shred_cf: LedgerColumn<cf::TShredData>,
+    t_code_shred_cf: LedgerColumn<cf::TShredCode>,
+    t_transaction_status_cf: LedgerColumn<cf::TTransactionStatus>,
+    t_blocktime_cf: LedgerColumn<cf::TBlocktime>,
+    t_block_height_cf: LedgerColumn<cf::TBlockHeight>,
+    t_optimistic_slots_cf: LedgerColumn<cf::TOptimisticSlots>,
 }
 
 pub struct IndexMetaWorkingSetEntry {
@@ -296,6 +310,21 @@ impl Blockstore {
         let bank_hash_cf = db.column();
         let optimistic_slots_cf = db.column();
 
+        // truly slot cf
+        let t_meta_cf = db.column();
+        let t_dead_slots_cf = db.column();
+        let t_duplicate_slots_cf = db.column();
+        let t_roots_cf = db.column();
+        let t_erasure_meta_cf = db.column();
+        let t_orphans_cf = db.column();
+        let t_index_cf = db.column();
+        let t_data_shred_cf = db.column();
+        let t_code_shred_cf = db.column();
+        let t_transaction_status_cf = db.column();
+        let t_blocktime_cf = db.column();
+        let t_block_height_cf = db.column();
+        let t_optimistic_slots_cf = db.column();
+
         let db = Arc::new(db);
 
         // Get max root or 0 if it doesn't exist
@@ -355,6 +384,19 @@ impl Blockstore {
             last_root,
             lowest_cleanup_slot: RwLock::<Slot>::default(),
             slots_stats: SlotsStats::default(),
+            t_meta_cf,
+            t_dead_slots_cf,
+            t_duplicate_slots_cf,
+            t_roots_cf,
+            t_erasure_meta_cf,
+            t_orphans_cf,
+            t_index_cf,
+            t_data_shred_cf,
+            t_code_shred_cf,
+            t_transaction_status_cf,
+            t_blocktime_cf,
+            t_block_height_cf,
+            t_optimistic_slots_cf,
         };
         if initialize_transaction_status_index {
             blockstore.initialize_transaction_status_index()?;
