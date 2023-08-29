@@ -427,8 +427,9 @@ impl Shred {
     }
 
     /// Unique identifier for each shred.
+    //todo check if the replace the slot to indeed slot will generate influence, add by jesse
     pub fn id(&self) -> ShredId {
-        ShredId(self.slot(), self.index(), self.shred_type())
+        ShredId(self.indeed_slot(), self.index(), self.shred_type())
     }
 
     pub fn slot(&self) -> Slot {

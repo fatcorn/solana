@@ -137,7 +137,9 @@ impl std::fmt::Display for InsertDataShredError {
 
 pub struct InsertResults {
     completed_data_set_infos: Vec<CompletedDataSetInfo>,
+    t_completed_data_set_infos: Vec<CompletedDataSetInfo>,
     duplicate_shreds: Vec<Shred>,
+    t_duplicate_shreds: Vec<Shred>,
 }
 
 /// A "complete data set" is a range of [`Shred`]s that combined in sequence carry a single
@@ -899,15 +901,24 @@ impl Blockstore {
         let mut index_working_set = HashMap::new();
         let mut duplicate_shreds = vec![];
 
-        // let mut t_erasure_metas = HashMap::new();
-        // let mut t_slot_meta_working_set = HashMap::new();
-        // let mut t_index_working_set = HashMap::new();
-        // let mut t_duplicate_shreds = vec![];
+        let mut t_just_inserted_shreds = HashMap::with_capacity(shreds.len());
+        let mut t_erasure_metas = HashMap::new();
+        let mut t_slot_meta_working_set = HashMap::new();
+        let mut t_index_working_set = HashMap::new();
+        let mut t_duplicate_shreds = vec![];
 
         metrics.num_shreds += shreds.len();
         let mut start = Measure::start("Shred insertion");
         let mut index_meta_time_us = 0;
         let mut newly_completed_data_sets: Vec<CompletedDataSetInfo> = vec![];
+        let mut t_newly_completed_data_sets: Vec<CompletedDataSetInfo> = vec![];
+        let mut put_complete_data_sets = |is_virtual: bool, completed_data_sets: &Vec<CompletedDataSetInfo>| {
+            if is_virtual {
+                newly_completed_data_sets.extend(completed_data_sets);
+            } else {
+                t_newly_completed_data_sets.extend(completed_data_sets);
+            }
+        };
         for (shred, is_repaired) in shreds.into_iter().zip(is_repaired) {
             let shred_source = if is_repaired {
                 ShredSource::Repaired
@@ -916,6 +927,7 @@ impl Blockstore {
             };
             match shred.shred_type() {
                 ShredType::Data => {
+                    let is_virtual = shred.is_virtual();
                     match self.check_insert_data_shred(
                         shred,
                         &mut erasure_metas,
@@ -928,6 +940,11 @@ impl Blockstore {
                         &mut duplicate_shreds,
                         leader_schedule,
                         shred_source,
+                        &mut t_index_working_set,
+                        &mut t_slot_meta_working_set,
+                        &mut t_just_inserted_shreds,
+                        &mut t_erasure_metas,
+                        &mut t_duplicate_shreds,
                     ) {
                         Err(InsertDataShredError::Exists) => {
                             if is_repaired {
@@ -947,7 +964,8 @@ impl Blockstore {
                             if is_repaired {
                                 metrics.num_repair += 1;
                             }
-                            newly_completed_data_sets.extend(completed_data_sets);
+                            put_complete_data_sets(is_virtual, &completed_data_sets);
+
                             metrics.num_inserted += 1;
                         }
                     };
@@ -964,6 +982,10 @@ impl Blockstore {
                         is_trusted,
                         shred_source,
                         metrics,
+                        &mut t_index_working_set,
+                        &mut t_just_inserted_shreds,
+                        &mut t_erasure_metas,
+                        &mut t_duplicate_shreds,
                     );
                 }
             };
@@ -973,12 +995,19 @@ impl Blockstore {
         metrics.insert_shreds_elapsed_us += start.as_us();
         let mut start = Measure::start("Shred recovery");
         if let Some(leader_schedule_cache) = leader_schedule {
-            let recovered_shreds = self.try_shred_recovery(
+            let mut recovered_shreds = self.try_shred_recovery(
                 &erasure_metas,
                 &mut index_working_set,
                 &just_inserted_shreds,
                 reed_solomon_cache,
             );
+            let t_recovered_shreds = self.try_shred_recovery(
+                &t_erasure_metas,
+                &mut t_index_working_set,
+                &t_just_inserted_shreds,
+                reed_solomon_cache,
+            );
+            recovered_shreds.extend(t_recovered_shreds);
 
             metrics.num_recovered += recovered_shreds
                 .iter()
@@ -1011,6 +1040,11 @@ impl Blockstore {
                         &mut duplicate_shreds,
                         leader_schedule,
                         ShredSource::Recovered,
+                        &mut t_index_working_set,
+                        &mut t_slot_meta_working_set,
+                        &mut t_just_inserted_shreds,
+                        &mut t_erasure_metas,
+                        &mut t_duplicate_shreds,
                     ) {
                         Err(InsertDataShredError::Exists) => {
                             metrics.num_recovered_exists += 1;
@@ -1026,7 +1060,7 @@ impl Blockstore {
                             None
                         }
                         Ok(completed_data_sets) => {
-                            newly_completed_data_sets.extend(completed_data_sets);
+                            put_complete_data_sets(shred.is_virtual(), &completed_data_sets);
                             metrics.num_recovered_inserted += 1;
                             Some(shred)
                         }
@@ -1054,7 +1088,8 @@ impl Blockstore {
         // Handle chaining for the members of the slot_meta_working_set that were inserted into,
         // drop the others
         // TODO, handle next write batch deal in next around. add by jesse
-        self.handle_chaining(&mut write_batch, &mut slot_meta_working_set)?;
+        self.handle_chaining(&mut write_batch, &mut slot_meta_working_set, true)?;
+        self.handle_chaining(&mut write_batch, &mut t_slot_meta_working_set, false)?;
         start.stop();
         metrics.chaining_elapsed_us += start.as_us();
 
@@ -1063,10 +1098,22 @@ impl Blockstore {
             &slot_meta_working_set,
             &self.completed_slots_senders.lock().unwrap(),
             &mut write_batch,
+            true,
+        )?;
+        // todo, check the t_newly_completed_slots need send by sender, add by jesse
+        let (t_should_signal, t_newly_completed_slots) = commit_slot_meta_working_set(
+            &t_slot_meta_working_set,
+            &self.completed_slots_senders.lock().unwrap(),
+            &mut write_batch,
+            false,
         )?;
 
         for (erasure_set, erasure_meta) in erasure_metas {
             write_batch.put::<cf::ErasureMeta>(erasure_set.store_key(), &erasure_meta)?;
+        }
+
+        for (erasure_set, erasure_meta) in t_erasure_metas {
+            write_batch.put::<cf::TErasureMeta>(erasure_set.store_key(), &erasure_meta)?;
         }
 
         for (&slot, index_working_set_entry) in index_working_set.iter() {
@@ -1074,6 +1121,13 @@ impl Blockstore {
                 write_batch.put::<cf::Index>(slot, &index_working_set_entry.index)?;
             }
         }
+
+        for (&slot, index_working_set_entry) in t_index_working_set.iter() {
+            if index_working_set_entry.did_insert_occur {
+                write_batch.put::<cf::TIndex>(slot, &index_working_set_entry.index)?;
+            }
+        }
+
         start.stop();
         metrics.commit_working_sets_elapsed_us += start.as_us();
 
@@ -1096,7 +1150,9 @@ impl Blockstore {
 
         Ok(InsertResults {
             completed_data_set_infos: newly_completed_data_sets,
+            t_completed_data_set_infos: t_newly_completed_data_sets,
             duplicate_shreds,
+            t_duplicate_shreds,
         })
     }
 
@@ -1114,9 +1170,12 @@ impl Blockstore {
     where
         F: Fn(Shred),
     {
+        // todo, add new member in InsertResults, so may be handle it later, add by jesse
         let InsertResults {
             completed_data_set_infos,
+            t_completed_data_set_infos,
             duplicate_shreds,
+            t_duplicate_shreds
         } = self.do_insert_shreds(
             shreds,
             is_repaired,
@@ -1201,7 +1260,7 @@ impl Blockstore {
             );
         }
     }
-
+    // todo, outside func may handle the new member t_completed_data_set_infos, add by jesse
     pub fn insert_shreds(
         &self,
         shreds: Vec<Shred>,
@@ -1234,14 +1293,25 @@ impl Blockstore {
         is_trusted: bool,
         shred_source: ShredSource,
         metrics: &mut BlockstoreInsertionMetrics,
+        t_index_working_set: &mut HashMap<u64, IndexMetaWorkingSetEntry>,
+        t_just_inserted_shreds: &mut HashMap<ShredId, Shred>,
+        t_erasure_metas: &mut HashMap<ErasureSetId, ErasureMeta>,
+        t_duplicate_shreds: &mut Vec<Shred>,
     ) -> bool {
         let slot= shred.indeed_slot();
         let is_virtual = shred.is_virtual();
         let shred_index = u64::from(shred.index());
-        let (last_root, slots_stats) = if is_virtual {
-            (&self.last_root, &self.slots_stats)
+        let (
+            last_root,
+            slots_stats,
+            erasure_metas,
+            index_working_set,
+            just_received_shreds,
+            duplicate_shreds
+        ) = if is_virtual {
+            (&self.last_root, &self.slots_stats, erasure_metas, index_working_set, just_received_shreds, duplicate_shreds)
         } else {
-            (&self.t_last_root, &self.t_slots_stats)
+            (&self.t_last_root, &self.t_slots_stats, t_erasure_metas, t_index_working_set, t_just_inserted_shreds, t_duplicate_shreds)
         };
 
         let index_meta_working_set_entry =
@@ -1414,10 +1484,26 @@ impl Blockstore {
         duplicate_shreds: &mut Vec<Shred>,
         leader_schedule: Option<&LeaderScheduleCache>,
         shred_source: ShredSource,
+        t_index_working_set: &mut HashMap<u64, IndexMetaWorkingSetEntry>,
+        t_slot_meta_working_set: &mut HashMap<u64, SlotMetaWorkingSetEntry>,
+        t_just_inserted_shreds: &mut HashMap<ShredId, Shred>,
+        t_erasure_metas: &mut HashMap<ErasureSetId, ErasureMeta>,
+        t_duplicate_shreds: &mut Vec<Shred>,
     ) -> std::result::Result<Vec<CompletedDataSetInfo>, InsertDataShredError> {
         let is_virtual = shred.is_virtual();
         let slot = shred.indeed_slot();
         let shred_index = u64::from(shred.index());
+        let (
+            index_working_set,
+            slot_meta_working_set ,
+            just_inserted_shreds,
+            erasure_metas,
+            duplicate_shreds,
+        ) = if is_virtual {
+            (index_working_set, slot_meta_working_set, just_inserted_shreds, erasure_metas, duplicate_shreds)
+        } else {
+            (t_index_working_set, t_slot_meta_working_set, t_just_inserted_shreds, t_erasure_metas, t_duplicate_shreds)
+        };
 
         // todo, index_working_set should be index_working_set or t_index_working_set, later finish, add by jesse
         let index_meta_working_set_entry =
@@ -3638,19 +3724,24 @@ impl Blockstore {
         &self,
         write_batch: &mut WriteBatch,
         working_set: &mut HashMap<u64, SlotMetaWorkingSetEntry>,
+        is_virtual: bool,
     ) -> Result<()> {
         // Handle chaining for all the SlotMetas that were inserted into
         working_set.retain(|_, entry| entry.did_insert_occur);
         let mut new_chained_slots = HashMap::new();
         let working_set_slots: Vec<_> = working_set.keys().collect();
         for slot in working_set_slots {
-            self.handle_chaining_for_slot(write_batch, working_set, &mut new_chained_slots, *slot)?;
+            self.handle_chaining_for_slot(write_batch, working_set, &mut new_chained_slots, *slot, is_virtual)?;
         }
 
         // Write all the newly changed slots in new_chained_slots to the write_batch
         for (slot, meta) in new_chained_slots.iter() {
             let meta: &SlotMeta = &RefCell::borrow(meta);
-            write_batch.put::<cf::SlotMeta>(*slot, meta)?;
+            if is_virtual {
+                write_batch.put::<cf::SlotMeta>(*slot, meta)?;
+            } else {
+                write_batch.put::<cf::TSlotMeta>(*slot, meta)?;
+            }
         }
         Ok(())
     }
@@ -3689,6 +3780,7 @@ impl Blockstore {
         working_set: &HashMap<u64, SlotMetaWorkingSetEntry>,
         new_chained_slots: &mut HashMap<u64, Rc<RefCell<SlotMeta>>>,
         slot: Slot,
+        is_virtual: bool,
     ) -> Result<()> {
         let slot_meta_entry = working_set
             .get(&slot)
@@ -3712,7 +3804,7 @@ impl Blockstore {
                 // previously unknown.
                 if meta_backup.is_none() || was_orphan_slot {
                     let prev_slot_meta =
-                        self.find_slot_meta_else_create(working_set, new_chained_slots, prev_slot)?;
+                        self.find_slot_meta_else_create(working_set, new_chained_slots, prev_slot, is_virtual)?;
 
                     // This is a newly inserted slot/orphan so run the chaining logic to link it to a
                     // newly discovered parent
@@ -3725,14 +3817,29 @@ impl Blockstore {
                     // If the parent of `slot` is a newly inserted orphan, insert it into the orphans
                     // column family
                     if is_orphan(&RefCell::borrow(&*prev_slot_meta)) {
-                        write_batch.put::<cf::Orphans>(prev_slot, &true)?;
+                        match is_virtual {
+                            true => {
+                                write_batch.put::<cf::Orphans>(prev_slot, &true)?;
+                            }
+                            false => {
+                                write_batch.put::<cf::TOrphans>(prev_slot, &true)?;
+                            }
+                        }
+
                     }
                 }
             }
 
             // At this point this slot has received a parent, so it's no longer an orphan
             if was_orphan_slot {
-                write_batch.delete::<cf::Orphans>(slot)?;
+                match is_virtual {
+                    true => {
+                        write_batch.delete::<cf::Orphans>(slot)?;
+                    }
+                    false => {
+                        write_batch.delete::<cf::TOrphans>(slot)?;
+                    }
+                }
             }
         }
 
@@ -3750,6 +3857,7 @@ impl Blockstore {
                 working_set,
                 new_chained_slots,
                 SlotMeta::set_parent_connected,
+                is_virtual
             )?;
         }
 
@@ -3775,6 +3883,7 @@ impl Blockstore {
         working_set: &HashMap<u64, SlotMetaWorkingSetEntry>,
         passed_visisted_slots: &mut HashMap<u64, Rc<RefCell<SlotMeta>>>,
         slot_function: F,
+        is_virtual: bool,
     ) -> Result<()>
     where
         F: Fn(&mut SlotMeta) -> bool,
@@ -3784,7 +3893,7 @@ impl Blockstore {
         while !next_slots.is_empty() {
             let slot = next_slots.pop_front().unwrap();
             let meta_ref =
-                self.find_slot_meta_else_create(working_set, passed_visisted_slots, slot)?;
+                self.find_slot_meta_else_create(working_set, passed_visisted_slots, slot, is_virtual)?;
             let mut meta = meta_ref.borrow_mut();
             if slot_function(&mut meta) {
                 meta.next_slots
@@ -3861,12 +3970,13 @@ impl Blockstore {
         working_set: &'a HashMap<u64, SlotMetaWorkingSetEntry>,
         chained_slots: &'a mut HashMap<u64, Rc<RefCell<SlotMeta>>>,
         slot_index: u64,
+        is_virtual: bool,
     ) -> Result<Rc<RefCell<SlotMeta>>> {
         let result = find_slot_meta_in_cached_state(working_set, chained_slots, slot_index);
         if let Some(slot) = result {
             Ok(slot)
         } else {
-            self.find_slot_meta_in_db_else_create(slot_index, chained_slots)
+            self.find_slot_meta_in_db_else_create(slot_index, chained_slots, is_virtual)
         }
     }
 
@@ -3879,8 +3989,10 @@ impl Blockstore {
         &self,
         slot: Slot,
         insert_map: &mut HashMap<u64, Rc<RefCell<SlotMeta>>>,
+        is_virtual: bool,
     ) -> Result<Rc<RefCell<SlotMeta>>> {
-        if let Some(slot_meta) = self.meta_cf.get(slot)? {
+        let slot_meta = if is_virtual { self.meta_cf.get(slot) } else { self.t_meta_cf.get(slot) };
+        if let Some(slot_meta) = slot_meta? {
             insert_map.insert(slot, Rc::new(RefCell::new(slot_meta)));
         } else {
             // If this slot doesn't exist, make a orphan slot. This way we
@@ -4062,6 +4174,7 @@ fn commit_slot_meta_working_set(
     slot_meta_working_set: &HashMap<u64, SlotMetaWorkingSetEntry>,
     completed_slots_senders: &[Sender<Vec<u64>>],
     write_batch: &mut WriteBatch,
+    is_virtual: bool,
 ) -> Result<(bool, Vec<u64>)> {
     let mut should_signal = false;
     let mut newly_completed_slots = vec![];
@@ -4079,7 +4192,11 @@ fn commit_slot_meta_working_set(
         // Check if the working copy of the metadata has changed
         if Some(meta) != meta_backup.as_ref() {
             should_signal = should_signal || slot_has_updates(meta, meta_backup);
-            write_batch.put::<cf::SlotMeta>(*slot, meta)?;
+            match is_virtual {
+                true => { write_batch.put::<cf::SlotMeta>(*slot, meta)?; },
+                false => { write_batch.put::<cf::TSlotMeta>(*slot, meta)?; }
+            }
+
         }
     }
 
@@ -6814,6 +6931,13 @@ pub mod tests {
         let mut index_working_set = HashMap::new();
         let mut just_received_shreds = HashMap::new();
         let mut write_batch = blockstore.db.batch().unwrap();
+
+        let mut t_just_inserted_shreds = HashMap::with_capacity(shreds.len());
+        let mut t_erasure_metas = HashMap::new();
+        let mut t_slot_meta_working_set = HashMap::new();
+        let mut t_index_working_set = HashMap::new();
+        let mut t_duplicate_shreds = vec![];
+
         let mut index_meta_time_us = 0;
         assert!(blockstore.check_insert_coding_shred(
             coding_shred.clone(),
@@ -6826,6 +6950,10 @@ pub mod tests {
             false,
             ShredSource::Turbine,
             &mut BlockstoreInsertionMetrics::default(),
+            &mut t_index_working_set,
+            &mut t_just_inserted_shreds,
+            &mut t_erasure_metas,
+            &mut t_duplicate_shreds,
         ));
 
         // insert again fails on dupe
@@ -6841,6 +6969,10 @@ pub mod tests {
             false,
             ShredSource::Turbine,
             &mut BlockstoreInsertionMetrics::default(),
+            &mut t_index_working_set,
+            &mut t_just_inserted_shreds,
+            &mut t_erasure_metas,
+            &mut t_duplicate_shreds,
         ));
         assert_eq!(duplicate_shreds, vec![coding_shred]);
     }
@@ -7148,13 +7280,13 @@ pub mod tests {
         blockstore
             .insert_shreds(shreds1[..].to_vec(), None, false)
             .unwrap();
-        assert!(blockstore.get_data_shred(1, 0).unwrap().is_none());
+        assert!(blockstore.get_data_shred(1, 0, false).unwrap().is_none());
 
         // Insert through trusted path will succeed
         blockstore
             .insert_shreds(shreds1[..].to_vec(), None, true)
             .unwrap();
-        assert!(blockstore.get_data_shred(1, 0).unwrap().is_some());
+        assert!(blockstore.get_data_shred(1, 0, false).unwrap().is_some());
     }
 
     #[test]

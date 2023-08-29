@@ -532,6 +532,7 @@ impl StandardBroadcastRun {
         transmit_stats.num_shreds = shreds.len();
 
         // Process metrics
+        // todo, broadcast_shred_batch_info may need add is_virtual, to distinct the t_slot and v_slot
         self.update_transmit_metrics(&transmit_stats, &broadcast_shred_batch_info);
         Ok(())
     }

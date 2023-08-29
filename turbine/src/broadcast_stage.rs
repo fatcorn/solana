@@ -439,6 +439,7 @@ pub fn broadcast_shreds(
     };
     let (packets, quic_packets): (Vec<_>, Vec<_>) = shreds
         .iter()
+        // todo check, cause t_shred still have slot and it in same view, so this place use slot for grouping should ok, add by jesse
         .group_by(|shred| shred.slot())
         .into_iter()
         .flat_map(|(slot, shreds)| {
