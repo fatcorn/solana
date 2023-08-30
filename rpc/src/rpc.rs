@@ -346,6 +346,7 @@ impl JsonRpcRequestProcessor {
         let bank_forks = Arc::new(RwLock::new(BankForks::new_from_banks(
             &[bank.clone()],
             bank.slot(),
+            bank.t_slot()
         )));
         let blockstore = Arc::new(Blockstore::open(&get_tmp_ledger_path!()).unwrap());
         let exit = Arc::new(AtomicBool::new(false));

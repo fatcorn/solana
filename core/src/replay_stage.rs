@@ -3761,15 +3761,25 @@ impl ReplayStage {
         generate_new_bank_forks_read_lock.stop();
 
         let frozen_banks = forks.frozen_banks();
+        let t_frozen_banks = forks.frozen_banks();
         let frozen_bank_slots: Vec<u64> = frozen_banks
             .keys()
             .cloned()
             .filter(|s| *s >= forks.root())
             .collect();
+        let t_frozen_bank_slots: Vec<u64> = t_frozen_banks
+            .keys()
+            .cloned()
+            .filter(|s| *s >= forks.t_root())
+            .collect();
+
         let mut generate_new_bank_forks_get_slots_since =
             Measure::start("generate_new_bank_forks_get_slots_since");
         let next_slots = blockstore
-            .get_slots_since(&frozen_bank_slots)
+            .get_slots_since(&frozen_bank_slots, true)
+            .expect("Db error");
+        let t_next_slots = blockstore
+            .get_slots_since(&t_frozen_bank_slots, false)
             .expect("Db error");
         generate_new_bank_forks_get_slots_since.stop();
 
@@ -3779,6 +3789,7 @@ impl ReplayStage {
             next_slots.sort();
             next_slots
         });
+
         let mut generate_new_bank_forks_loop = Measure::start("generate_new_bank_forks_loop");
         let mut new_banks = HashMap::new();
         for (parent_slot, children) in next_slots {
@@ -3819,6 +3830,7 @@ impl ReplayStage {
                 new_banks.insert(child_slot, child_bank);
             }
         }
+
         drop(forks);
         generate_new_bank_forks_loop.stop();
 
@@ -4692,7 +4704,7 @@ pub(crate) mod tests {
         }
         bank0.freeze();
         let arc_bank0 = Arc::new(bank0);
-        let bank_forks = Arc::new(RwLock::new(BankForks::new_from_banks(&[arc_bank0], 0)));
+        let bank_forks = Arc::new(RwLock::new(BankForks::new_from_banks(&[arc_bank0], 0, 0)));
 
         let exit = Arc::new(AtomicBool::new(false));
         let block_commitment_cache = Arc::new(RwLock::new(BlockCommitmentCache::default()));
@@ -6279,7 +6291,7 @@ pub(crate) mod tests {
         assert_eq!(reset_fork, Some(5));
 
         // Mark 5 as duplicate
-        blockstore.store_duplicate_slot(5, vec![], vec![]).unwrap();
+        blockstore.store_duplicate_slot(5, vec![], vec![], false).unwrap();
         let mut duplicate_slots_tracker = DuplicateSlotsTracker::default();
         let mut purge_repair_slot_counter = PurgeRepairSlotCounter::default();
         let mut gossip_duplicate_confirmed_slots = GossipDuplicateConfirmedSlots::default();
@@ -6414,7 +6426,7 @@ pub(crate) mod tests {
 
         // Mark 4 as duplicate, 3 should be the heaviest slot, but should not be votable
         // because of lockout
-        blockstore.store_duplicate_slot(4, vec![], vec![]).unwrap();
+        blockstore.store_duplicate_slot(4, vec![], vec![], true).unwrap();
         let mut duplicate_slots_tracker = DuplicateSlotsTracker::default();
         let mut gossip_duplicate_confirmed_slots = GossipDuplicateConfirmedSlots::default();
         let mut epoch_slots_frozen_slots = EpochSlotsFrozenSlots::default();
@@ -6453,7 +6465,7 @@ pub(crate) mod tests {
         assert_eq!(reset_fork, Some(3));
 
         // Now mark 2, an ancestor of 4, as duplicate
-        blockstore.store_duplicate_slot(2, vec![], vec![]).unwrap();
+        blockstore.store_duplicate_slot(2, vec![], vec![], true).unwrap();
         let bank2_hash = bank_forks.read().unwrap().bank_hash(2).unwrap();
         assert_ne!(bank2_hash, Hash::default());
         let duplicate_state = DuplicateState::new_from_state(

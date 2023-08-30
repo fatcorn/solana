@@ -81,6 +81,8 @@ pub struct SlotMeta {
     /// Shreds indices which are marked data complete.  That is, those that have the
     /// [`ShredFlags::DATA_COMPLETE_SHRED`][`crate::shred::ShredFlags::DATA_COMPLETE_SHRED`] set.
     pub completed_data_indexes: BTreeSet<u32>,
+    /// Linked slot for linked truly slot with virtual slot,
+    pub linked_slot: Slot,
 }
 
 // Serde implementation of serialize and deserialize for Option<u64>
@@ -296,11 +298,12 @@ impl SlotMeta {
     }
 
     pub fn clear_unconfirmed_slot(&mut self) {
-        let old = std::mem::replace(self, SlotMeta::new_orphan(self.slot));
+        // todo, check ,add new linked_slot, check input self.linked_slot is ok, add by jesse
+        let old = std::mem::replace(self, SlotMeta::new_orphan(self.slot, self.linked_slot));
         self.next_slots = old.next_slots;
     }
 
-    pub(crate) fn new(slot: Slot, parent_slot: Option<Slot>) -> Self {
+    pub(crate) fn new(slot: Slot, parent_slot: Option<Slot>, linked_slot: Slot) -> Self {
         let connected_flags = if slot == 0 {
             // Slot 0 is the start, mark it as having its' parent connected
             // such that slot 0 becoming full will be updated as connected
@@ -312,12 +315,13 @@ impl SlotMeta {
             slot,
             parent_slot,
             connected_flags,
+            linked_slot,
             ..SlotMeta::default()
         }
     }
 
-    pub(crate) fn new_orphan(slot: Slot) -> Self {
-        Self::new(slot, /*parent_slot:*/ None)
+    pub(crate) fn new_orphan(slot: Slot, linked_slot: Slot) -> Self {
+        Self::new(slot, /*parent_slot:*/ None, linked_slot)
     }
 }
 
@@ -488,7 +492,7 @@ mod test {
 
     #[test]
     fn test_slot_meta_slot_zero_connected() {
-        let meta = SlotMeta::new(0 /* slot */, None /* parent */);
+        let meta = SlotMeta::new(0 /* slot */, None /* parent */, 0);
         assert!(meta.is_parent_connected());
         assert!(!meta.is_connected());
     }
@@ -625,13 +629,13 @@ mod test {
 
     #[test]
     fn test_clear_unconfirmed_slot() {
-        let mut slot_meta = SlotMeta::new_orphan(5);
+        let mut slot_meta = SlotMeta::new_orphan(5, 0);
         slot_meta.consumed = 5;
         slot_meta.received = 5;
         slot_meta.next_slots = vec![6, 7];
         slot_meta.clear_unconfirmed_slot();
 
-        let mut expected = SlotMeta::new_orphan(5);
+        let mut expected = SlotMeta::new_orphan(5, 0);
         expected.next_slots = vec![6, 7];
         assert_eq!(slot_meta, expected);
     }

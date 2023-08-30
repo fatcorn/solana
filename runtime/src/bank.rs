@@ -271,6 +271,12 @@ pub struct BankRc {
     pub(crate) slot: Slot,
 
     pub(crate) bank_id_generator: Arc<AtomicU64>,
+
+    /// Previous checkpoint of this truly bank
+    pub(crate) t_parent: RwLock<Option<Arc<Bank>>>,
+
+    /// Current truly slot
+    pub(crate) t_slot: Slot,
 }
 
 #[cfg(RUSTC_WITH_SPECIALIZATION)]
@@ -291,12 +297,14 @@ impl AbiExample for BankRc {
 }
 
 impl BankRc {
-    pub(crate) fn new(accounts: Accounts, slot: Slot) -> Self {
+    pub(crate) fn new(accounts: Accounts, slot: Slot, t_slot: Slot) -> Self {
         Self {
             accounts: Arc::new(accounts),
             parent: RwLock::new(None),
             slot,
             bank_id_generator: Arc::new(AtomicU64::new(0)),
+            t_parent: RwLock::new(None),
+            t_slot,
         }
     }
 }
@@ -450,6 +458,13 @@ pub struct BankFieldsToDeserialize {
     pub(crate) incremental_snapshot_persistence: Option<BankIncrementalSnapshotPersistence>,
     pub(crate) epoch_accounts_hash: Option<Hash>,
     pub(crate) epoch_reward_status: EpochRewardStatus,
+    // The truly slot info
+    pub(crate) t_parent_hash: Hash,
+    pub(crate) t_parent_slot: Slot,
+    pub(crate) t_hash: Hash,
+    pub(crate) t_slot: Slot,
+    pub(crate) t_block_height: u64,
+    pub(crate) t_ancestors: AncestorsForSerialization,
 }
 
 /// Bank's common fields shared by all supported snapshot versions for serialization.
@@ -493,6 +508,13 @@ pub(crate) struct BankFieldsToSerialize<'a> {
     pub(crate) epoch_stakes: &'a HashMap<Epoch, EpochStakes>,
     pub(crate) is_delta: bool,
     pub(crate) accounts_data_len: u64,
+    // The truly slot info
+    pub(crate) t_parent_hash: Hash,
+    pub(crate) t_parent_slot: Slot,
+    pub(crate) t_hash: Hash,
+    pub(crate) t_slot: Slot,
+    pub(crate) t_block_height: u64,
+    pub(crate) t_ancestors: &'a AncestorsForSerialization,
 }
 
 // Can't derive PartialEq because RwLock doesn't implement PartialEq
@@ -506,6 +528,7 @@ impl PartialEq for Bank {
             status_cache: _,
             blockhash_queue,
             ancestors,
+            t_ancestors,
             hash,
             parent_hash,
             parent_slot,
@@ -573,6 +596,7 @@ impl PartialEq for Bank {
         } = self;
         *blockhash_queue.read().unwrap() == *other.blockhash_queue.read().unwrap()
             && ancestors == &other.ancestors
+            && t_ancestors == &other.t_ancestors
             && *hash.read().unwrap() == *other.hash.read().unwrap()
             && parent_hash == &other.parent_hash
             && parent_slot == &other.parent_slot
@@ -680,20 +704,12 @@ pub struct Bank {
     /// Hash of this Bank's state. Only meaningful after freezing.
     hash: RwLock<Hash>,
 
-    /// Hash of this Bank's truly slot state. Only meaningful after freezing.
-    t_hash: RwLock<Hash>,
-
     /// Hash of this Bank's parent's state
     parent_hash: Hash,
 
     /// parent's slot
     parent_slot: Slot,
 
-    /// Hash of this Bank's tx chain parent's state
-    t_parent_hash: Hash,
-
-    /// Tx chain parent's slot
-    t_parent_slot: Slot,
 
     /// slots to hard fork at
     hard_forks: Arc<RwLock<HardForks>>,
@@ -745,8 +761,6 @@ pub struct Bank {
     /// Bank slot (i.e. block)
     slot: Slot,
 
-    /// Bank tx slot (i.e. block)
-    t_slot: Slot,
 
     bank_id: BankId,
 
@@ -755,9 +769,6 @@ pub struct Bank {
 
     /// Bank block_height
     block_height: u64,
-
-    /// Bank tx block_height
-    t_block_height: u64,
 
     /// The pubkey to send transactions fees to.
     collector_id: Pubkey,
@@ -845,6 +856,24 @@ pub struct Bank {
     pub check_program_modification_slot: bool,
 
     epoch_reward_status: EpochRewardStatus,
+
+    /// Hash of this Bank's truly slot state. Only meaningful after freezing.
+    t_hash: RwLock<Hash>,
+
+    /// Hash of this Bank's tx chain parent's state
+    t_parent_hash: Hash,
+
+    /// Tx chain parent's slot
+    t_parent_slot: Slot,
+
+    /// Bank tx slot (i.e. block)
+    t_slot: Slot,
+
+    /// Bank tx block_height
+    t_block_height: u64,
+
+    /// The set of parents including this truly bank
+    pub t_ancestors: Ancestors,
 }
 
 struct VoteWithStakeDelegations {
@@ -1030,16 +1059,13 @@ impl Bank {
     fn default_with_accounts(accounts: Accounts) -> Self {
         let mut bank = Self {
             incremental_snapshot_persistence: None,
-            rc: BankRc::new(accounts, Slot::default()),
+            rc: BankRc::new(accounts, Slot::default(), Slot::default()),
             status_cache: Arc::<RwLock<BankStatusCache>>::default(),
             blockhash_queue: RwLock::<BlockhashQueue>::default(),
             ancestors: Ancestors::default(),
             hash: RwLock::<Hash>::default(),
-            t_hash: Default::default(),
             parent_hash: Hash::default(),
             parent_slot: Slot::default(),
-            t_parent_hash: Default::default(),
-            t_parent_slot: Slot::default(),
             hard_forks: Arc::<RwLock<HardForks>>::default(),
             transaction_count: AtomicU64::default(),
             non_vote_transaction_count_since_restart: AtomicU64::default(),
@@ -1056,11 +1082,9 @@ impl Bank {
             genesis_creation_time: UnixTimestamp::default(),
             slots_per_year: f64::default(),
             slot: Slot::default(),
-            t_slot: Slot::default(),
             bank_id: BankId::default(),
             epoch: Epoch::default(),
             block_height: u64::default(),
-            t_block_height: u64::default(),
             collector_id: Pubkey::default(),
             collector_fees: AtomicU64::default(),
             fee_rate_governor: FeeRateGovernor::default(),
@@ -1094,6 +1118,13 @@ impl Bank {
             loaded_programs_cache: Arc::<RwLock<LoadedPrograms>>::default(),
             check_program_modification_slot: false,
             epoch_reward_status: EpochRewardStatus::default(),
+
+            t_slot: Slot::default(),
+            t_block_height: u64::default(),
+            t_hash: RwLock::<Hash>::default(),
+            t_parent_hash: Hash::default(),
+            t_parent_slot: Slot::default(),
+            t_ancestors: Ancestors::default(),
         };
 
         let accounts_data_size_initial = bank.get_total_accounts_stats().unwrap().data_len as u64;
@@ -1331,6 +1362,9 @@ impl Bank {
                 parent: RwLock::new(Some(Arc::clone(parent))),
                 slot,
                 bank_id_generator: Arc::clone(&parent.rc.bank_id_generator),
+                t_parent: RwLock::new(Some(Arc::clone(parent))),
+                // todo, wait for input, add by jesse
+                t_slot: 0
             }
         });
 
@@ -1379,8 +1413,8 @@ impl Bank {
             t_hash: RwLock::new(Hash::default()),
             // todo, wait for func input, add by jesse
             t_slot: 0,
-            t_block_height: parent.t_block_height + 1,
-
+            t_block_height: parent.t_block_height,
+            t_ancestors: Ancestors::default(),
 
 
             // TODO: clean this up, so much special-case copying...
@@ -1743,6 +1777,14 @@ impl Bank {
             .filter(move |slot| *slot != self.slot)
     }
 
+    /// Returns all tuly ancestors excluding self.t_slot.
+    pub(crate) fn t_proper_ancestors(&self) -> impl Iterator<Item = Slot> + '_ {
+        self.t_ancestors
+            .keys()
+            .into_iter()
+            .filter(move |slot| *slot != self.t_slot)
+    }
+
     pub fn set_callback(&self, callback: Option<Box<dyn DropCallback + Send + Sync>>) {
         *self.drop_callback.write().unwrap() = OptionalDropCallback(callback);
     }
@@ -1813,6 +1855,7 @@ impl Bank {
     ) -> Self {
         let now = Instant::now();
         let ancestors = Ancestors::from(&fields.ancestors);
+        let t_ancestors = Ancestors::from(&fields.t_ancestors);
         // For backward compatibility, we can only serialize and deserialize
         // Stakes<Delegation> in BankFieldsTo{Serialize,Deserialize}. But Bank
         // caches Stakes<StakeAccount>. Below Stakes<StakeAccount> is obtained
@@ -1894,15 +1937,13 @@ impl Bank {
             check_program_modification_slot: false,
             epoch_reward_status: EpochRewardStatus::default(),
 
-            // todo data from fields
-            t_hash : RwLock::new(Hash::default()),
-
-            t_slot: Slot::default(),
-            t_parent_hash: Hash::default(),
-            t_parent_slot: Slot::default(),
-            t_block_height: Slot::default(),
-
-
+            // todo check
+            t_hash : RwLock::new(fields.t_hash),
+            t_slot: fields.slot,
+            t_parent_hash: fields.t_parent_hash,
+            t_parent_slot: fields.t_parent_slot,
+            t_block_height: fields.t_block_height,
+            t_ancestors,
         };
         bank.finish_init(
             genesis_config,
@@ -1963,6 +2004,7 @@ impl Bank {
     pub(crate) fn get_fields_to_serialize<'a>(
         &'a self,
         ancestors: &'a HashMap<Slot, usize>,
+        t_ancestors: &'a HashMap<Slot, usize>,
     ) -> BankFieldsToSerialize<'a> {
         BankFieldsToSerialize {
             blockhash_queue: &self.blockhash_queue,
@@ -1996,6 +2038,12 @@ impl Bank {
             epoch_stakes: &self.epoch_stakes,
             is_delta: self.is_delta.load(Relaxed),
             accounts_data_len: self.load_accounts_data_size(),
+            t_parent_hash: self.t_parent_hash,
+            t_parent_slot: self.t_parent_slot,
+            t_hash: *self.t_hash.read().unwrap(),
+            t_slot: self.t_slot,
+            t_block_height: self.t_block_height,
+            t_ancestors,
         }
     }
 
@@ -3857,6 +3905,10 @@ impl Bank {
     /// Return the more recent checkpoint of this bank instance.
     pub fn parent(&self) -> Option<Arc<Bank>> {
         self.rc.parent.read().unwrap().clone()
+    }
+
+    pub fn t_parent(&self) -> Option<Arc<Bank>> {
+        self.rc.t_parent.read().unwrap().clone()
     }
 
     pub fn parent_slot(&self) -> Slot {
@@ -6534,6 +6586,17 @@ impl Bank {
         while let Some(parent) = bank {
             parents.push(parent.clone());
             bank = parent.parent();
+        }
+        parents
+    }
+
+    /// Compute all the parents of the truly bank in order
+    pub fn t_parents(&self) -> Vec<Arc<Bank>> {
+        let mut parents = vec![];
+        let mut bank = self.t_parent();
+        while let Some(parent) = bank {
+            parents.push(parent.clone());
+            bank = parent.t_parent();
         }
         parents
     }

@@ -60,6 +60,10 @@ pub struct BankForks {
     descendants: HashMap<Slot, HashSet<Slot>>,
     root: Arc<AtomicSlot>,
 
+    t_banks: HashMap<Slot, Arc<Bank>>,
+    t_descendants: HashMap<Slot, HashSet<Slot>>,
+    t_root: Arc<AtomicSlot>,
+
     pub snapshot_config: Option<SnapshotConfig>,
 
     pub accounts_hash_interval_slots: Slot,
@@ -78,7 +82,8 @@ impl Index<u64> for BankForks {
 impl BankForks {
     pub fn new(bank: Bank) -> Self {
         let root = bank.slot();
-        Self::new_from_banks(&[Arc::new(bank)], root)
+        let t_root = bank.t_slot();
+        Self::new_from_banks(&[Arc::new(bank)], root, t_root)
     }
 
     pub fn banks(&self) -> HashMap<Slot, Arc<Bank>> {
@@ -122,6 +127,14 @@ impl BankForks {
             .collect()
     }
 
+    pub fn t_frozen_banks(&self) -> HashMap<Slot, Arc<Bank>> {
+        self.t_banks
+            .iter()
+            .filter(|(_, b)| b.is_frozen())
+            .map(|(k, b)| (*k, b.clone()))
+            .collect()
+    }
+
     pub fn active_bank_slots(&self) -> Vec<Slot> {
         self.banks
             .iter()
@@ -132,6 +145,10 @@ impl BankForks {
 
     pub fn get(&self, bank_slot: Slot) -> Option<Arc<Bank>> {
         self.banks.get(&bank_slot).cloned()
+    }
+
+    pub fn get_mut(&mut self, bank_slot: Slot) -> Option<&mut Arc<Bank>> {
+        self.banks.get_mut(&bank_slot)
     }
 
     pub fn get_with_checked_hash(
@@ -153,12 +170,15 @@ impl BankForks {
         self[self.root()].clone()
     }
 
-    pub fn new_from_banks(initial_forks: &[Arc<Bank>], root: Slot) -> Self {
+    pub fn new_from_banks(initial_forks: &[Arc<Bank>], root: Slot, t_root: Slot) -> Self {
         let mut banks = HashMap::new();
+        let mut t_banks = HashMap::new();
 
         // Iterate through the heads of all the different forks
         for bank in initial_forks {
             banks.insert(bank.slot(), bank.clone());
+            t_banks.insert(bank.t_slot(), bank.clone());
+
             let parents = bank.parents();
             for parent in parents {
                 if banks.insert(parent.slot(), parent.clone()).is_some() {
@@ -166,16 +186,35 @@ impl BankForks {
                     break;
                 }
             }
+
+            let t_parents = bank.t_parents();
+            for t_parent in t_parents {
+                if t_banks.insert(t_parent.slot(), t_parent.clone()).is_some() {
+                    // All ancestors have already been inserted by another fork
+                    break;
+                }
+            }
         }
+
         let mut descendants = HashMap::<_, HashSet<_>>::new();
+        let mut t_descendants = HashMap::<_, HashSet<_>>::new();
         for (slot, bank) in &banks {
             descendants.entry(*slot).or_default();
             for parent in bank.proper_ancestors() {
                 descendants.entry(parent).or_default().insert(*slot);
             }
         }
+
+        for (t_slot, t_bank) in &t_banks {
+            t_descendants.entry(*t_slot).or_default();
+            for t_parent in t_bank.t_proper_ancestors() {
+                t_descendants.entry(t_parent).or_default().insert(*t_slot);
+            }
+        }
         Self {
             root: Arc::new(AtomicSlot::new(root)),
+            t_banks,
+            t_descendants,
             banks,
             descendants,
             snapshot_config: None,
@@ -183,6 +222,7 @@ impl BankForks {
             last_accounts_hash_slot: root,
             in_vote_only_mode: Arc::new(AtomicBool::new(false)),
             highest_slot_at_startup: 0,
+            t_root: Arc::new(AtomicSlot::new(t_root)),
         }
     }
 
@@ -520,6 +560,10 @@ impl BankForks {
         self.root.load(Ordering::Relaxed)
     }
 
+    pub fn t_root(&self) -> Slot {
+        self.t_root.load(Ordering::Relaxed)
+    }
+
     /// Gets a read-only wrapper to an atomic slot holding the root slot.
     pub fn get_atomic_root(&self) -> ReadOnlyAtomicSlot {
         ReadOnlyAtomicSlot {
@@ -709,11 +753,11 @@ mod tests {
         let bank = Arc::new(Bank::new_for_tests(&genesis_config));
         let child_bank = Arc::new(Bank::new_from_parent(&bank, &Pubkey::default(), 1));
 
-        let bank_forks = BankForks::new_from_banks(&[bank.clone(), child_bank.clone()], 0);
+        let bank_forks = BankForks::new_from_banks(&[bank.clone(), child_bank.clone()], 0, 0);
         assert_eq!(bank_forks.root(), 0);
         assert_eq!(bank_forks.working_bank().slot(), 1);
 
-        let bank_forks = BankForks::new_from_banks(&[child_bank, bank], 0);
+        let bank_forks = BankForks::new_from_banks(&[child_bank, bank], 0, 0);
         assert_eq!(bank_forks.root(), 0);
         assert_eq!(bank_forks.working_bank().slot(), 1);
     }
@@ -882,7 +926,7 @@ mod tests {
         let GenesisConfigInfo { genesis_config, .. } = create_genesis_config(10_000);
         let mut banks = vec![Arc::new(Bank::new_for_tests(&genesis_config))];
         assert_eq!(banks[0].slot(), 0);
-        let mut bank_forks = BankForks::new_from_banks(&banks, 0);
+        let mut bank_forks = BankForks::new_from_banks(&banks, 0, 0);
         banks.push(bank_forks.insert(Bank::new_from_parent(&banks[0], &Pubkey::default(), 1)));
         banks.push(bank_forks.insert(Bank::new_from_parent(&banks[1], &Pubkey::default(), 2)));
         banks.push(bank_forks.insert(Bank::new_from_parent(&banks[0], &Pubkey::default(), 3)));
@@ -941,7 +985,7 @@ mod tests {
         let GenesisConfigInfo { genesis_config, .. } = create_genesis_config(10_000);
         let mut banks = vec![Arc::new(Bank::new_for_tests(&genesis_config))];
         assert_eq!(banks[0].slot(), 0);
-        let mut bank_forks = BankForks::new_from_banks(&banks, 0);
+        let mut bank_forks = BankForks::new_from_banks(&banks, 0, 0);
         banks.push(bank_forks.insert(Bank::new_from_parent(&banks[0], &Pubkey::default(), 1)));
         banks.push(bank_forks.insert(Bank::new_from_parent(&banks[1], &Pubkey::default(), 2)));
         banks.push(bank_forks.insert(Bank::new_from_parent(&banks[0], &Pubkey::default(), 3)));

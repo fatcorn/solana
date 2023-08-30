@@ -855,6 +855,7 @@ impl Validator {
         ));
 
         let max_slots = Arc::new(MaxSlots::default());
+        // todo, handle truly slot, add by jesse
         let (completed_data_sets_sender, completed_data_sets_receiver) =
             bounded(MAX_COMPLETED_DATA_SETS_IN_CHANNEL);
         let completed_data_sets_service = CompletedDataSetsService::new(

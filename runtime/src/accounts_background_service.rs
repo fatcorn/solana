@@ -911,6 +911,7 @@ mod test {
                     &bank,
                     &Pubkey::new_unique(),
                     bank.slot() + 1,
+                    bank.t_slot(),
                 ));
 
                 // Since we're not using `BankForks::set_root()`, we have to handle sending the

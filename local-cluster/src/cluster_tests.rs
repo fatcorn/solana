@@ -179,14 +179,15 @@ pub fn verify_ledger_ticks(ledger_path: &Path, ticks_per_slot: usize) {
     let ledger = Blockstore::open(ledger_path).unwrap();
     let zeroth_slot = ledger.get_slot_entries(0, 0).unwrap();
     let last_id = zeroth_slot.last().unwrap().hash;
-    let next_slots = ledger.get_slots_since(&[0]).unwrap().remove(&0).unwrap();
+    // todo, check is_virtual = true ok here and next line? add by jesse
+    let next_slots = ledger.get_slots_since(&[0], true).unwrap().remove(&0).unwrap();
     let mut pending_slots: Vec<_> = next_slots
         .into_iter()
         .map(|slot| (slot, 0, last_id))
         .collect();
     while let Some((slot, parent_slot, last_id)) = pending_slots.pop() {
         let next_slots = ledger
-            .get_slots_since(&[slot])
+            .get_slots_since(&[slot], true)
             .unwrap()
             .remove(&slot)
             .unwrap();

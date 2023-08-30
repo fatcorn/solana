@@ -448,6 +448,14 @@ impl Shred {
         }
     }
 
+    pub fn linked_slot(&self) -> Slot {
+        if self.is_virtual() {
+            self.common_header().t_slot
+        } else {
+            self.common_header().slot
+        }
+    }
+
 
     pub fn is_virtual(&self) -> bool {
         self.common_header().is_virtual
@@ -660,6 +668,7 @@ pub mod layout {
     }
 
     #[inline]
+    // todo the slot may use indeed slot, or take v_slot and t_slot and is_virtual into the shredID, add by jesse
     pub fn get_shred_id(shred: &[u8]) -> Option<ShredId> {
         Some(ShredId(
             get_slot(shred)?,

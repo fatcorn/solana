@@ -61,6 +61,14 @@ struct DeserializableVersionedBank {
     unused_accounts: UnusedAccounts,
     epoch_stakes: HashMap<Epoch, EpochStakes>,
     is_delta: bool,
+
+    // The truly slot info
+    t_parent_hash: Hash,
+    t_parent_slot: Slot,
+    t_hash: Hash,
+    t_slot: Slot,
+    t_block_height: u64,
+    t_ancestors: AncestorsForSerialization,
 }
 
 impl From<DeserializableVersionedBank> for BankFieldsToDeserialize {
@@ -100,6 +108,12 @@ impl From<DeserializableVersionedBank> for BankFieldsToDeserialize {
             incremental_snapshot_persistence: None,
             epoch_accounts_hash: None,
             epoch_reward_status: EpochRewardStatus::Inactive,
+            t_parent_hash: dvb.t_parent_hash,
+            t_parent_slot: dvb.t_parent_slot,
+            t_hash: dvb.t_hash,
+            t_slot: dvb.t_slot,
+            t_block_height: dvb.t_block_height,
+            t_ancestors: dvb.t_ancestors,
         }
     }
 }
@@ -199,7 +213,8 @@ impl<'a> TypeContext<'a> for Context {
         Self: std::marker::Sized,
     {
         let ancestors = HashMap::from(&serializable_bank.bank.ancestors);
-        let fields = serializable_bank.bank.get_fields_to_serialize(&ancestors);
+        let t_ancestors = HashMap::from(&serializable_bank.bank.t_ancestors);
+        let fields = serializable_bank.bank.get_fields_to_serialize(&ancestors, &t_ancestors);
         let lamports_per_signature = fields.fee_rate_governor.lamports_per_signature;
         let epoch_reward_status = serializable_bank
             .bank
@@ -237,7 +252,8 @@ impl<'a> TypeContext<'a> for Context {
         Self: std::marker::Sized,
     {
         let ancestors = HashMap::from(&serializable_bank.bank.ancestors);
-        let fields = serializable_bank.bank.get_fields_to_serialize(&ancestors);
+        let t_ancestors = HashMap::from(&serializable_bank.bank.t_ancestors);
+        let fields = serializable_bank.bank.get_fields_to_serialize(&ancestors, &t_ancestors);
         (
             SerializableVersionedBank::from(fields),
             SerializableAccountsDb::<'a, Self> {

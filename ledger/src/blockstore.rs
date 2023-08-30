@@ -1492,6 +1492,7 @@ impl Blockstore {
     ) -> std::result::Result<Vec<CompletedDataSetInfo>, InsertDataShredError> {
         let is_virtual = shred.is_virtual();
         let slot = shred.indeed_slot();
+        let linked_slot = shred.linked_slot();
         let shred_index = u64::from(shred.index());
         let (
             index_working_set,
@@ -1517,6 +1518,7 @@ impl Blockstore {
                 .parent()
                 .map_err(|_| InsertDataShredError::InvalidShred)?,
             is_virtual,
+            linked_slot
         );
 
         let slot_meta = &mut slot_meta_entry.new_slot_meta.borrow_mut();
@@ -1882,7 +1884,7 @@ impl Blockstore {
             }
             let to_index = cmp::min(to_index, meta.consumed);
             for index in from_index..to_index {
-                if let Some(shred_data) = self.get_data_shred(slot, index)? {
+                if let Some(shred_data) = self.get_data_shred(slot, index, true)? {
                     let shred_len = shred_data.len();
                     if buffer.len().saturating_sub(buffer_offset) >= shred_len {
                         buffer[buffer_offset..buffer_offset + shred_len]
@@ -3258,15 +3260,36 @@ impl Blockstore {
 
     /// Returns a mapping from each elements of `slots` to a list of the
     /// element's children slots.
-    pub fn get_slots_since(&self, slots: &[Slot]) -> Result<HashMap<Slot, Vec<Slot>>> {
-        let slot_metas: Result<Vec<Option<SlotMeta>>> =
-            self.meta_cf.multi_get(slots.to_vec()).into_iter().collect();
+    pub fn get_slots_since(&self, slots: &[Slot], is_virtual: bool) -> Result<HashMap<Slot, Vec<Slot>>> {
+
+        let slot_metas: Result<Vec<Option<SlotMeta>>> = if is_virtual {
+            self.meta_cf.multi_get(slots.to_vec()).into_iter().collect()
+        } else {
+            self.t_meta_cf.multi_get(slots.to_vec()).into_iter().collect()
+        };
+
         let slot_metas = slot_metas?;
 
         let result: HashMap<Slot, Vec<Slot>> = slots
             .iter()
             .zip(slot_metas)
             .filter_map(|(slot, meta)| meta.map(|meta| (*slot, meta.next_slots.to_vec())))
+            .collect();
+
+        Ok(result)
+    }
+
+    /// get t slots linked_slots, for creating t_forks, add by jesse
+    pub fn get_t_slots_with_linked_slots(&self, t_slots: &[Slot]) -> Result<Vec<(Slot, Slot)>> {
+
+        let slot_metas: Result<Vec<Option<SlotMeta>>> = self.t_meta_cf.multi_get(t_slots.to_vec()).into_iter().collect();
+
+        let slot_metas = slot_metas?;
+
+        let result: Vec<(Slot, Slot)> = t_slots
+            .iter()
+            .zip(slot_metas)
+            .filter_map(|(slot, meta)| meta.map(|meta| ((meta.slot, meta.linked_slot))))
             .collect();
 
         Ok(result)
@@ -3664,9 +3687,10 @@ impl Blockstore {
     /// root as connected such that the node that joined midway through can
     /// have their slots considered connected.
     pub fn set_and_chain_connected_on_root_and_next_slots(&self, root: Slot) -> Result<()> {
+        // todo, check this func may need t_root ,add related t_root_slot to set in here for create new root_meta, add by jesse
         let mut root_meta = self
             .meta(root)?
-            .unwrap_or_else(|| SlotMeta::new(root, None));
+            .unwrap_or_else(|| SlotMeta::new(root, None, 0));
         // If the slot was already connected, there is nothing to do as this slot's
         // children are also assumed to be appropriately connected
         if root_meta.is_connected() {
@@ -3928,6 +3952,7 @@ impl Blockstore {
         slot: Slot,
         parent_slot: Slot,
         is_virtual: bool,
+        linked_slot: Slot,
     ) -> &'a mut SlotMetaWorkingSetEntry {
         // Check if we've already inserted the slot metadata for this shred's slot
         slot_meta_working_set.entry(slot).or_insert_with(|| {
@@ -3948,7 +3973,7 @@ impl Blockstore {
                 SlotMetaWorkingSetEntry::new(Rc::new(RefCell::new(meta)), backup)
             } else {
                 SlotMetaWorkingSetEntry::new(
-                    Rc::new(RefCell::new(SlotMeta::new(slot, Some(parent_slot)))),
+                    Rc::new(RefCell::new(SlotMeta::new(slot, Some(parent_slot), linked_slot))),
                     None,
                 )
             }
@@ -3998,7 +4023,8 @@ impl Blockstore {
             // If this slot doesn't exist, make a orphan slot. This way we
             // remember which slots chained to this one when we eventually get a real shred
             // for this slot
-            insert_map.insert(slot, Rc::new(RefCell::new(SlotMeta::new_orphan(slot))));
+            // todo check, if slot not found in db, so its linked slot set to 0, add by jesse
+            insert_map.insert(slot, Rc::new(RefCell::new(SlotMeta::new_orphan(slot, 0))));
         }
         Ok(insert_map.get(&slot).unwrap().clone())
     }
@@ -5037,7 +5063,7 @@ pub mod tests {
         let blockstore = Blockstore::open(ledger_path.path()).unwrap();
 
         // Test meta column family
-        let meta = SlotMeta::new(0, Some(1));
+        let meta = SlotMeta::new(0, Some(1), 0);
         blockstore.meta_cf.put(0, &meta).unwrap();
         let result = blockstore
             .meta_cf
@@ -5086,7 +5112,7 @@ pub mod tests {
         // Test meta column family
         for i in 0..TEST_PUT_ENTRY_COUNT {
             let k = u64::try_from(i).unwrap();
-            let meta = SlotMeta::new(k, Some(k + 1));
+            let meta = SlotMeta::new(k, Some(k + 1), 0);
             blockstore.meta_cf.put(k, &meta).unwrap();
             let result = blockstore
                 .meta_cf
@@ -5104,7 +5130,7 @@ pub mod tests {
             let k = u64::try_from(i).unwrap();
             assert_eq!(
                 value.as_ref().unwrap().as_ref().unwrap(),
-                &SlotMeta::new(k, Some(k + 1))
+                &SlotMeta::new(k, Some(k + 1), 0)
             );
         }
     }
@@ -6288,29 +6314,29 @@ pub mod tests {
         let blockstore = Blockstore::open(ledger_path.path()).unwrap();
 
         // Slot doesn't exist
-        assert!(blockstore.get_slots_since(&[0]).unwrap().is_empty());
+        assert!(blockstore.get_slots_since(&[0], true).unwrap().is_empty());
 
-        let mut meta0 = SlotMeta::new(0, Some(0));
+        let mut meta0 = SlotMeta::new(0, Some(0), 0);
         blockstore.meta_cf.put(0, &meta0).unwrap();
 
         // Slot exists, chains to nothing
         let expected: HashMap<u64, Vec<u64>> = vec![(0, vec![])].into_iter().collect();
-        assert_eq!(blockstore.get_slots_since(&[0]).unwrap(), expected);
+        assert_eq!(blockstore.get_slots_since(&[0], true).unwrap(), expected);
         meta0.next_slots = vec![1, 2];
         blockstore.meta_cf.put(0, &meta0).unwrap();
 
         // Slot exists, chains to some other slots
         let expected: HashMap<u64, Vec<u64>> = vec![(0, vec![1, 2])].into_iter().collect();
-        assert_eq!(blockstore.get_slots_since(&[0]).unwrap(), expected);
-        assert_eq!(blockstore.get_slots_since(&[0, 1]).unwrap(), expected);
+        assert_eq!(blockstore.get_slots_since(&[0], true).unwrap(), expected);
+        assert_eq!(blockstore.get_slots_since(&[0, 1], true).unwrap(), expected);
 
-        let mut meta3 = SlotMeta::new(3, Some(1));
+        let mut meta3 = SlotMeta::new(3, Some(1), 0);
         meta3.next_slots = vec![10, 5];
         blockstore.meta_cf.put(3, &meta3).unwrap();
         let expected: HashMap<u64, Vec<u64>> = vec![(0, vec![1, 2]), (3, vec![10, 5])]
             .into_iter()
             .collect();
-        assert_eq!(blockstore.get_slots_since(&[0, 1, 3]).unwrap(), expected);
+        assert_eq!(blockstore.get_slots_since(&[0, 1, 3], true).unwrap(), expected);
     }
 
     #[test]
@@ -6851,7 +6877,7 @@ pub mod tests {
             None,
             ShredSource::Repaired,
         ));
-        assert!(blockstore.has_duplicate_shreds_in_slot(0));
+        assert!(blockstore.has_duplicate_shreds_in_slot(0, true));
 
         // Insert all pending shreds
         let mut shred8 = shreds[8].clone();
@@ -7060,7 +7086,7 @@ pub mod tests {
         assert_eq!(slot_meta.last_index, Some(num_shreds - 1));
         assert!(slot_meta.is_full());
 
-        assert!(blockstore.has_duplicate_shreds_in_slot(0));
+        assert!(blockstore.has_duplicate_shreds_in_slot(0, true));
     }
 
     #[test]
@@ -7939,13 +7965,13 @@ pub mod tests {
         //    2 (root)
         //    |
         //    3
-        let meta0 = SlotMeta::new(0, Some(0));
+        let meta0 = SlotMeta::new(0, Some(0), 0);
         blockstore.meta_cf.put(0, &meta0).unwrap();
-        let meta1 = SlotMeta::new(1, Some(0));
+        let meta1 = SlotMeta::new(1, Some(0), 1);
         blockstore.meta_cf.put(1, &meta1).unwrap();
-        let meta2 = SlotMeta::new(2, Some(0));
+        let meta2 = SlotMeta::new(2, Some(0), 2);
         blockstore.meta_cf.put(2, &meta2).unwrap();
-        let meta3 = SlotMeta::new(3, Some(2));
+        let meta3 = SlotMeta::new(3, Some(2), 3);
         blockstore.meta_cf.put(3, &meta3).unwrap();
 
         blockstore.set_roots(vec![0, 2].iter()).unwrap();
@@ -8122,13 +8148,13 @@ pub mod tests {
         let signature2 = Signature::from([3u8; 64]);
 
         // Insert rooted slots 0..=3 with no fork
-        let meta0 = SlotMeta::new(0, Some(0));
+        let meta0 = SlotMeta::new(0, Some(0), 0);
         blockstore.meta_cf.put(0, &meta0).unwrap();
-        let meta1 = SlotMeta::new(1, Some(0));
+        let meta1 = SlotMeta::new(1, Some(0), 0);
         blockstore.meta_cf.put(1, &meta1).unwrap();
-        let meta2 = SlotMeta::new(2, Some(1));
+        let meta2 = SlotMeta::new(2, Some(1), 0);
         blockstore.meta_cf.put(2, &meta2).unwrap();
-        let meta3 = SlotMeta::new(3, Some(2));
+        let meta3 = SlotMeta::new(3, Some(2), 0);
         blockstore.meta_cf.put(3, &meta3).unwrap();
 
         blockstore.set_roots(vec![0, 1, 2, 3].iter()).unwrap();
@@ -9433,7 +9459,7 @@ pub mod tests {
         for (s, buf) in data_shreds.iter().zip(shred_bufs) {
             assert_eq!(
                 blockstore
-                    .get_data_shred(s.slot(), s.index() as u64)
+                    .get_data_shred(s.slot(), s.index() as u64, true)
                     .unwrap()
                     .unwrap(),
                 buf
@@ -9621,7 +9647,7 @@ pub mod tests {
         for ((slot, index), _) in data_iter {
             num_data += 1;
             // Test that iterator and individual shred lookup yield same set
-            assert!(blockstore.get_data_shred(slot, index).unwrap().is_some());
+            assert!(blockstore.get_data_shred(slot, index, true).unwrap().is_some());
             // Test that the data index has current shred accounted for
             assert!(shred_index.data().contains(index));
         }
@@ -9635,7 +9661,7 @@ pub mod tests {
         for ((slot, index), _) in coding_iter {
             num_coding += 1;
             // Test that the iterator and individual shred lookup yield same set
-            assert!(blockstore.get_coding_shred(slot, index).unwrap().is_some());
+            assert!(blockstore.get_coding_shred(slot, index, true).unwrap().is_some());
             // Test that the coding index has current shred accounted for
             assert!(shred_index.coding().contains(index));
         }
@@ -9687,7 +9713,7 @@ pub mod tests {
             .unwrap();
 
         // No duplicate shreds exist yet
-        assert!(!blockstore.has_duplicate_shreds_in_slot(slot));
+        assert!(!blockstore.has_duplicate_shreds_in_slot(slot, true));
 
         // Check if shreds are duplicated
         assert_eq!(
@@ -9704,11 +9730,12 @@ pub mod tests {
                 slot,
                 shred.payload().clone(),
                 duplicate_shred.payload().clone(),
+                true
             )
             .unwrap();
 
         // Slot is now marked as duplicate
-        assert!(blockstore.has_duplicate_shreds_in_slot(slot));
+        assert!(blockstore.has_duplicate_shreds_in_slot(slot, true));
 
         // Check ability to fetch the duplicates
         let duplicate_proof = blockstore.get_duplicate_slot(slot).unwrap();
@@ -9733,11 +9760,11 @@ pub mod tests {
         blockstore.insert_shreds(shreds, None, false).unwrap();
         // Should only be one shred in slot 9
         assert!(blockstore
-            .get_data_shred(unconfirmed_slot, 0)
+            .get_data_shred(unconfirmed_slot, 0, true)
             .unwrap()
             .is_some());
         assert!(blockstore
-            .get_data_shred(unconfirmed_slot, 1)
+            .get_data_shred(unconfirmed_slot, 1, true)
             .unwrap()
             .is_none());
         blockstore.set_dead_slot(unconfirmed_slot).unwrap();
@@ -9754,7 +9781,7 @@ pub mod tests {
             vec![unconfirmed_child_slot]
         );
         assert!(blockstore
-            .get_data_shred(unconfirmed_slot, 0)
+            .get_data_shred(unconfirmed_slot, 0, true)
             .unwrap()
             .is_none());
     }
@@ -9785,7 +9812,7 @@ pub mod tests {
         blockstore.clear_unconfirmed_slot(unconfirmed_slot);
         assert!(!blockstore.is_dead(unconfirmed_slot));
         assert!(blockstore
-            .get_data_shred(unconfirmed_slot, 0)
+            .get_data_shred(unconfirmed_slot, 0, true)
             .unwrap()
             .is_none());
 
@@ -10039,7 +10066,7 @@ pub mod tests {
         blockstore
             .insert_shreds(vec![coding1[0].clone(), coding2[1].clone()], None, false)
             .unwrap();
-        assert!(blockstore.has_duplicate_shreds_in_slot(slot));
+        assert!(blockstore.has_duplicate_shreds_in_slot(slot, true));
     }
 
     #[test]
@@ -10175,11 +10202,11 @@ pub mod tests {
         for i in 0..num_shreds {
             if i <= smaller_last_shred_index as u64 {
                 assert_eq!(
-                    blockstore.get_data_shred(slot, i).unwrap().unwrap(),
+                    blockstore.get_data_shred(slot, i, true).unwrap().unwrap(),
                     *shreds[i as usize].payload()
                 );
             } else {
-                assert!(blockstore.get_data_shred(slot, i).unwrap().is_none());
+                assert!(blockstore.get_data_shred(slot, i, true).unwrap().is_none());
             }
         }
         let mut meta = blockstore.meta(slot).unwrap().unwrap();
@@ -10207,11 +10234,11 @@ pub mod tests {
         for i in 0..num_shreds {
             if i <= smaller_last_shred_index as u64 {
                 assert_eq!(
-                    blockstore.get_data_shred(slot, i).unwrap().unwrap(),
+                    blockstore.get_data_shred(slot, i, true).unwrap().unwrap(),
                     *shreds[i as usize].payload()
                 );
             } else {
-                assert!(blockstore.get_data_shred(slot, i).unwrap().is_none());
+                assert!(blockstore.get_data_shred(slot, i, true).unwrap().is_none());
             }
         }
         let mut meta = blockstore.meta(slot).unwrap().unwrap();
@@ -10241,14 +10268,14 @@ pub mod tests {
             {
                 assert_eq!(
                     blockstore
-                        .get_data_shred(slot, shred_index)
+                        .get_data_shred(slot, shred_index, true)
                         .unwrap()
                         .unwrap(),
                     *shred_to_check.payload()
                 );
             } else {
                 assert!(blockstore
-                    .get_data_shred(slot, shred_index)
+                    .get_data_shred(slot, shred_index, true)
                     .unwrap()
                     .is_none());
             }
@@ -10272,14 +10299,14 @@ pub mod tests {
             {
                 assert_eq!(
                     blockstore
-                        .get_data_shred(slot, shred_index)
+                        .get_data_shred(slot, shred_index, true)
                         .unwrap()
                         .unwrap(),
                     *shred_to_check.payload()
                 );
             } else {
                 assert!(blockstore
-                    .get_data_shred(slot, shred_index)
+                    .get_data_shred(slot, shred_index, true)
                     .unwrap()
                     .is_none());
             }
