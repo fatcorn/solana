@@ -3836,7 +3836,8 @@ impl Bank {
 
     pub fn rehash(&self) {
         let mut hash = self.hash.write().unwrap();
-        let new = self.hash_internal_state();
+        // todo, add valid args later, add by jesse
+        let new = self.hash_internal_state(false);
         if new != *hash {
             warn!("Updating bank hash to {}", new);
             *hash = new;
@@ -3866,8 +3867,12 @@ impl Bank {
 
             // freeze is a one-way trip, idempotent
             self.freeze_started.store(true, Relaxed);
-            *hash = self.hash_internal_state();
+            *hash = self.hash_internal_state(true);
             self.rc.accounts.accounts_db.mark_slot_frozen(self.slot());
+        }
+        if self.is_include_t_slot() {
+            let mut hash = self.t_hash.write().unwrap();
+            *hash = self.hash_internal_state(false);
         }
     }
 
@@ -7103,7 +7108,7 @@ impl Bank {
 
     /// Hash the `accounts` HashMap. This represents a validator's interpretation
     ///  of the delta of the ledger since the last vote and up to now
-    fn hash_internal_state(&self) -> Hash {
+    fn hash_internal_state(&self, is_virtual: bool) -> Hash {
         let slot = self.slot();
         let ignore = (!self.is_partitioned_rewards_feature_enabled()
             && (self
@@ -7121,8 +7126,9 @@ impl Bank {
         let mut signature_count_buf = [0u8; 8];
         LittleEndian::write_u64(&mut signature_count_buf[..], self.signature_count());
 
+
         let mut hash = hashv(&[
-            self.parent_hash.as_ref(),
+            if is_virtual { self.parent_hash.as_ref() } else { self.t_parent_hash.read().unwrap().as_ref() },
             accounts_delta_hash.0.as_ref(),
             &signature_count_buf,
             self.last_blockhash().as_ref(),
@@ -7152,7 +7158,7 @@ impl Bank {
             .get_bank_hash_stats(slot)
             .expect("No bank hash stats were found for this bank, that should not be possible");
         info!(
-            "bank frozen: {slot} hash: {hash} accounts_delta: {} signature_count: {} last_blockhash: {} capitalization: {}{}, stats: {bank_hash_stats:?}",
+            "bank frozen: {slot} hash: {hash} accounts_delta: {} signature_count: {} last_blockhash: {} capitalization: {}{}, stats: {bank_hash_stats:?}, is_virtual: {}",
             accounts_delta_hash.0,
             self.signature_count(),
             self.last_blockhash(),
@@ -7161,7 +7167,8 @@ impl Bank {
                 format!(", epoch_accounts_hash: {:?}", epoch_accounts_hash.as_ref())
             } else {
                 "".to_string()
-            }
+            },
+            is_virtual
         );
         hash
     }
@@ -7367,7 +7374,8 @@ impl Bank {
     #[must_use]
     fn verify_hash(&self) -> bool {
         assert!(self.is_frozen());
-        let calculated_hash = self.hash_internal_state();
+        // todo, add valid args later, add by jesse
+        let calculated_hash = self.hash_internal_state(false);
         let expected_hash = self.hash();
 
         if calculated_hash == expected_hash {
