@@ -72,7 +72,8 @@ impl CompletedDataSetsService {
                 end_index,
             } = completed_set_info;
             max_slot = max_slot.max(slot);
-            match blockstore.get_entries_in_data_block(slot, start_index, end_index, None) {
+            // todo, input valid args later, add by jesse
+            match blockstore.get_entries_in_data_block(slot, start_index, end_index, None, false) {
                 Ok(entries) => {
                     let transactions = Self::get_transaction_signatures(entries);
                     if !transactions.is_empty() {

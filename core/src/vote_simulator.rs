@@ -85,7 +85,7 @@ impl VoteSimulator {
             let new_bank = Bank::new_from_parent(&parent_bank, &Pubkey::default(), slot);
             self.progress
                 .entry(slot)
-                .or_insert_with(|| ForkProgress::new(Hash::default(), None, None, 0, 0));
+                .or_insert_with(|| ForkProgress::new(Hash::default(), None, None, 0, 0, Hash::default()));
             for (pubkey, vote) in cluster_votes.iter() {
                 if vote.contains(&parent) {
                     let keypairs = self.validator_keypairs.get(pubkey).unwrap();
@@ -255,7 +255,7 @@ impl VoteSimulator {
     ) {
         self.progress
             .entry(slot)
-            .or_insert_with(|| ForkProgress::new(Hash::default(), None, None, 0, 0))
+            .or_insert_with(|| ForkProgress::new(Hash::default(), None, None, 0, 0, Hash::default()))
             .fork_stats
             .lockout_intervals
             .entry(lockout_interval.1)

@@ -69,6 +69,7 @@ struct DeserializableVersionedBank {
     t_slot: Slot,
     t_block_height: u64,
     t_ancestors: AncestorsForSerialization,
+    is_t_slot_exist: bool,
 }
 
 impl From<DeserializableVersionedBank> for BankFieldsToDeserialize {
@@ -114,6 +115,7 @@ impl From<DeserializableVersionedBank> for BankFieldsToDeserialize {
             t_slot: dvb.t_slot,
             t_block_height: dvb.t_block_height,
             t_ancestors: dvb.t_ancestors,
+            is_t_slot_exist: dvb.is_t_slot_exist,
         }
     }
 }

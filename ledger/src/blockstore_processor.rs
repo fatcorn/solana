@@ -922,6 +922,7 @@ fn confirm_full_slot(
     let skip_verification = !opts.run_verification;
     let ignored_prioritization_fee_cache = PrioritizationFeeCache::new(0u64);
 
+    // todo, figure out what this func function, use default args temporary, check later, add by jesse
     confirm_slot(
         blockstore,
         bank,
@@ -935,6 +936,7 @@ fn confirm_full_slot(
         opts.allow_dead_slots,
         opts.runtime_config.log_messages_bytes_limit,
         &ignored_prioritization_fee_cache,
+        true
     )?;
 
     timing.accumulate(&confirmation_timing.batch_execute.totals);
@@ -1081,13 +1083,13 @@ pub fn confirm_slot(
     allow_dead_slots: bool,
     log_messages_bytes_limit: Option<usize>,
     prioritization_fee_cache: &PrioritizationFeeCache,
+    is_virtual: bool,
 ) -> result::Result<(), BlockstoreProcessorError> {
-    let slot = bank.slot();
-
+    let slot = if is_virtual { bank.slot() } else { bank.t_slot() } ;
     let slot_entries_load_result = {
         let mut load_elapsed = Measure::start("load_elapsed");
         let load_result = blockstore
-            .get_slot_entries_with_shred_info(slot, progress.num_shreds, allow_dead_slots)
+            .get_slot_entries_with_shred_info(slot, progress.num_shreds, allow_dead_slots, is_virtual)
             .map_err(BlockstoreProcessorError::FailedToLoadEntries);
         load_elapsed.stop();
         if load_result.is_err() {

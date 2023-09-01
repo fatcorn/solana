@@ -3029,7 +3029,8 @@ impl Blockstore {
 
     /// Returns the entry vector for the slot starting with `shred_start_index`
     pub fn get_slot_entries(&self, slot: Slot, shred_start_index: u64) -> Result<Vec<Entry>> {
-        self.get_slot_entries_with_shred_info(slot, shred_start_index, false)
+        // todo, input valid is_virtual in later, add by jesse
+        self.get_slot_entries_with_shred_info(slot, shred_start_index, false, false)
             .map(|x| x.0)
     }
 
@@ -3040,14 +3041,17 @@ impl Blockstore {
         slot: Slot,
         start_index: u64,
         allow_dead_slots: bool,
+        is_virtual: bool,
     ) -> Result<(Vec<Entry>, u64, bool)> {
-        let (completed_ranges, slot_meta) = self.get_completed_ranges(slot, start_index)?;
+        let (completed_ranges, slot_meta) = self.get_completed_ranges(slot, start_index, is_virtual)?;
 
         // Check if the slot is dead *after* fetching completed ranges to avoid a race
         // where a slot is marked dead by another thread before the completed range query finishes.
         // This should be sufficient because full slots will never be marked dead from another thread,
         // this can only happen during entry processing during replay stage.
-        if self.is_dead(slot) && !allow_dead_slots {
+        // todo, check, for now, if slot dead in v_slot, t_slot should dead too, so may not need t_dead_slots_cf add by jesse
+        // todo, if t_slot or v_slot dead one, both insert, should ok in here, recover to old now, check later
+        if self.is_dead(slot, is_virtual) && !allow_dead_slots {
             return Err(BlockstoreError::DeadSlot);
         } else if completed_ranges.is_empty() {
             return Ok((vec![], 0, false));
@@ -3063,7 +3067,7 @@ impl Blockstore {
             completed_ranges
                 .into_iter()
                 .map(|(start_index, end_index)| {
-                    self.get_entries_in_data_block(slot, start_index, end_index, Some(&slot_meta))
+                    self.get_entries_in_data_block(slot, start_index, end_index, Some(&slot_meta), is_virtual)
                 })
                 .collect()
         } else {
@@ -3076,6 +3080,7 @@ impl Blockstore {
                             start_index,
                             end_index,
                             Some(&slot_meta),
+                            is_virtual
                         )
                     })
                     .collect()
@@ -3132,8 +3137,13 @@ impl Blockstore {
         &self,
         slot: Slot,
         start_index: u64,
+        is_virtual: bool,
     ) -> Result<(CompletedRanges, Option<SlotMeta>)> {
-        let slot_meta = self.meta_cf.get(slot)?;
+        let slot_meta = if is_virtual {
+            self.meta_cf.get(slot)?
+        } else {
+            self.t_meta_cf.get(slot)?
+        };
         if slot_meta.is_none() {
             return Ok((vec![], slot_meta));
         }
@@ -3174,16 +3184,25 @@ impl Blockstore {
         start_index: u32,
         end_index: u32,
         slot_meta: Option<&SlotMeta>,
+        is_virtual: bool,
     ) -> Result<Vec<Entry>> {
         let keys: Vec<(Slot, u64)> = (start_index..=end_index)
             .map(|index| (slot, u64::from(index)))
             .collect();
 
-        let data_shreds: Result<Vec<Option<Vec<u8>>>> = self
-            .data_shred_cf
-            .multi_get_bytes(keys)
-            .into_iter()
-            .collect();
+        let data_shreds: Result<Vec<Option<Vec<u8>>>> = if is_virtual {
+            self
+                .data_shred_cf
+                .multi_get_bytes(keys)
+                .into_iter()
+                .collect()
+        } else {
+            self
+                .t_data_shred_cf
+                .multi_get_bytes(keys)
+                .into_iter()
+                .collect()
+        };
         let data_shreds = data_shreds?;
 
         let data_shreds: Result<Vec<Shred>> =
@@ -3238,8 +3257,9 @@ impl Blockstore {
     }
 
     fn get_any_valid_slot_entries(&self, slot: Slot, start_index: u64) -> Vec<Entry> {
+        // todo, input valid is_virtual later, add by jesse
         let (completed_ranges, slot_meta) = self
-            .get_completed_ranges(slot, start_index)
+            .get_completed_ranges(slot, start_index, false)
             .unwrap_or_default();
         if completed_ranges.is_empty() {
             return vec![];
@@ -3250,7 +3270,8 @@ impl Blockstore {
             completed_ranges
                 .par_iter()
                 .map(|(start_index, end_index)| {
-                    self.get_entries_in_data_block(slot, *start_index, *end_index, Some(&slot_meta))
+                    // todo, input valid is_virtual later, add by jesse
+                    self.get_entries_in_data_block(slot, *start_index, *end_index, Some(&slot_meta), false)
                         .unwrap_or_default()
                 })
                 .collect()
@@ -3428,17 +3449,31 @@ impl Blockstore {
         Ok(())
     }
 
-    pub fn is_dead(&self, slot: Slot) -> bool {
-        matches!(
+    pub fn is_dead(&self, slot: Slot, is_virtual: bool) -> bool {
+        if is_virtual {
+            matches!(
             self.db
                 .get::<cf::DeadSlots>(slot)
                 .expect("fetch from DeadSlots column family failed"),
             Some(true)
-        )
+            )
+        } else {
+            matches!(
+            self.db
+                .get::<cf::TDeadSlots>(slot)
+                .expect("fetch from TDeadSlots column family failed"),
+            Some(true)
+            )
+        }
+
     }
 
     pub fn set_dead_slot(&self, slot: Slot) -> Result<()> {
         self.dead_slots_cf.put(slot, &true)
+    }
+
+    pub fn set_t_dead_slot(&self, slot: Slot) -> Result<()> {
+        self.t_dead_slots_cf.put(slot, &true)
     }
 
     pub fn remove_dead_slot(&self, slot: Slot) -> Result<()> {

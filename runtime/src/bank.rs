@@ -33,6 +33,7 @@
 //! It offers a high-level API that signs transactions
 //! on behalf of the caller, and a low-level API for when they have
 //! already been signed and verified.
+use std::ops::{Deref, DerefMut};
 #[allow(deprecated)]
 use solana_sdk::recent_blockhashes_account;
 pub use solana_sdk::reward_type::RewardType;
@@ -276,7 +277,7 @@ pub struct BankRc {
     pub(crate) t_parent: RwLock<Option<Arc<Bank>>>,
 
     /// Current truly slot
-    pub(crate) t_slot: Slot,
+    pub(crate) t_slot: RwLock<Slot>,
 }
 
 #[cfg(RUSTC_WITH_SPECIALIZATION)]
@@ -304,7 +305,7 @@ impl BankRc {
             slot,
             bank_id_generator: Arc::new(AtomicU64::new(0)),
             t_parent: RwLock::new(None),
-            t_slot,
+            t_slot: RwLock::new(t_slot),
         }
     }
 }
@@ -465,6 +466,7 @@ pub struct BankFieldsToDeserialize {
     pub(crate) t_slot: Slot,
     pub(crate) t_block_height: u64,
     pub(crate) t_ancestors: AncestorsForSerialization,
+    pub(crate) is_t_slot_exist: bool,
 }
 
 /// Bank's common fields shared by all supported snapshot versions for serialization.
@@ -515,6 +517,7 @@ pub(crate) struct BankFieldsToSerialize<'a> {
     pub(crate) t_slot: Slot,
     pub(crate) t_block_height: u64,
     pub(crate) t_ancestors: &'a AncestorsForSerialization,
+    pub(crate) is_t_slot_exist: bool,
 }
 
 // Can't derive PartialEq because RwLock doesn't implement PartialEq
@@ -566,6 +569,7 @@ impl PartialEq for Bank {
             stakes_cache,
             epoch_stakes,
             is_delta,
+            is_t_slot_exist,
             // TODO: Confirm if all these fields are intentionally ignored!
             builtin_programs: _,
             runtime_config: _,
@@ -590,6 +594,7 @@ impl PartialEq for Bank {
             loaded_programs_cache: _,
             check_program_modification_slot: _,
             epoch_reward_status: _,
+
             // Ignore new fields explicitly if they do not impact PartialEq.
             // Adding ".." will remove compile-time checks that if a new field
             // is added to the struct, this PartialEq is accordingly updated.
@@ -624,11 +629,12 @@ impl PartialEq for Bank {
             && *stakes_cache.stakes() == *other.stakes_cache.stakes()
             && epoch_stakes == &other.epoch_stakes
             && is_delta.load(Relaxed) == other.is_delta.load(Relaxed)
-            && t_block_height == &other.t_block_height
-            && t_parent_slot == &other.t_parent_slot
-            && t_parent_hash == &other.t_parent_hash
-            && t_slot == &other.t_slot
+            && *t_block_height.read().unwrap() == *other.t_block_height.read().unwrap()
+            && *t_parent_slot.read().unwrap() == *other.t_parent_slot.read().unwrap()
+            && *t_parent_hash.read().unwrap() == *other.t_parent_hash.read().unwrap()
+            && *t_slot.read().unwrap() == *other.t_slot.read().unwrap()
             && *t_hash.read().unwrap() == *other.t_hash.read().unwrap()
+            && *is_t_slot_exist.read().unwrap() == *other.is_t_slot_exist.read().unwrap()
     }
 }
 
@@ -861,16 +867,19 @@ pub struct Bank {
     t_hash: RwLock<Hash>,
 
     /// Hash of this Bank's tx chain parent's state
-    t_parent_hash: Hash,
+    t_parent_hash: RwLock<Hash>,
 
     /// Tx chain parent's slot
-    t_parent_slot: Slot,
+    t_parent_slot: RwLock<Slot>,
 
     /// Bank tx slot (i.e. block)
-    t_slot: Slot,
+    t_slot: RwLock<Slot>,
 
     /// Bank tx block_height
-    t_block_height: u64,
+    t_block_height: RwLock<u64>,
+
+    /// Is t_slot exist in this slot
+    is_t_slot_exist: RwLock<bool>,
 
     /// The set of parents including this truly bank
     pub t_ancestors: Ancestors,
@@ -1119,12 +1128,13 @@ impl Bank {
             check_program_modification_slot: false,
             epoch_reward_status: EpochRewardStatus::default(),
 
-            t_slot: Slot::default(),
-            t_block_height: u64::default(),
+            t_slot: RwLock::<Slot>::default(),
+            t_block_height: RwLock::<u64>::default(),
             t_hash: RwLock::<Hash>::default(),
-            t_parent_hash: Hash::default(),
-            t_parent_slot: Slot::default(),
+            t_parent_hash: RwLock::<Hash>::default(),
+            t_parent_slot: RwLock::<Slot>::default(),
             t_ancestors: Ancestors::default(),
+            is_t_slot_exist: RwLock::<bool>::default(),
         };
 
         let accounts_data_size_initial = bank.get_total_accounts_stats().unwrap().data_len as u64;
@@ -1362,9 +1372,9 @@ impl Bank {
                 parent: RwLock::new(Some(Arc::clone(parent))),
                 slot,
                 bank_id_generator: Arc::clone(&parent.rc.bank_id_generator),
-                t_parent: RwLock::new(Some(Arc::clone(parent))),
+                t_parent: RwLock::new(None),
                 // todo, wait for input, add by jesse
-                t_slot: 0
+                t_slot: RwLock::new(u64::MAX),
             }
         });
 
@@ -1408,13 +1418,14 @@ impl Bank {
             blockhash_queue,
 
             // For split poh consensus
-            t_parent_slot: parent.t_slot,
-            t_parent_hash: parent.t_hash(),
+            t_parent_slot: RwLock::new(parent.t_slot()),
+            t_parent_hash: RwLock::new(parent.t_hash()),
             t_hash: RwLock::new(Hash::default()),
             // todo, wait for func input, add by jesse
-            t_slot: 0,
-            t_block_height: parent.t_block_height,
+            t_slot: RwLock::new(u64::MAX),
+            t_block_height: RwLock::new(parent.t_block_height()),
             t_ancestors: Ancestors::default(),
+            is_t_slot_exist: RwLock::new(false),
 
 
             // TODO: clean this up, so much special-case copying...
@@ -1782,7 +1793,7 @@ impl Bank {
         self.t_ancestors
             .keys()
             .into_iter()
-            .filter(move |slot| *slot != self.t_slot)
+            .filter(move |slot| *slot != self.t_slot())
     }
 
     pub fn set_callback(&self, callback: Option<Box<dyn DropCallback + Send + Sync>>) {
@@ -1939,11 +1950,12 @@ impl Bank {
 
             // todo check
             t_hash : RwLock::new(fields.t_hash),
-            t_slot: fields.slot,
-            t_parent_hash: fields.t_parent_hash,
-            t_parent_slot: fields.t_parent_slot,
-            t_block_height: fields.t_block_height,
+            t_slot: RwLock::new(fields.slot),
+            t_parent_hash:  RwLock::new(fields.t_parent_hash),
+            t_parent_slot:  RwLock::new(fields.t_parent_slot),
+            t_block_height:  RwLock::new(fields.t_block_height),
             t_ancestors,
+            is_t_slot_exist:  RwLock::new(fields.is_t_slot_exist),
         };
         bank.finish_init(
             genesis_config,
@@ -2038,12 +2050,13 @@ impl Bank {
             epoch_stakes: &self.epoch_stakes,
             is_delta: self.is_delta.load(Relaxed),
             accounts_data_len: self.load_accounts_data_size(),
-            t_parent_hash: self.t_parent_hash,
-            t_parent_slot: self.t_parent_slot,
+            t_parent_hash: *self.t_parent_hash.read().unwrap(),
+            t_parent_slot: *self.t_parent_slot.read().unwrap(),
             t_hash: *self.t_hash.read().unwrap(),
-            t_slot: self.t_slot,
-            t_block_height: self.t_block_height,
+            t_slot: *self.t_slot.read().unwrap(),
+            t_block_height: *self.t_block_height.read().unwrap(),
             t_ancestors,
+            is_t_slot_exist: *self.is_t_slot_exist.read().unwrap(),
         }
     }
 
@@ -2060,7 +2073,7 @@ impl Bank {
     }
 
     pub fn t_slot(&self) -> Slot {
-        self.t_slot
+        *self.t_slot.read().unwrap()
     }
 
     pub fn bank_id(&self) -> BankId {
@@ -2087,8 +2100,17 @@ impl Bank {
         *self.t_hash.read().unwrap()
     }
 
+    // if slot has truly tx, its t_slot should frozen too, add by jesse
     pub fn is_frozen(&self) -> bool {
-        *self.hash.read().unwrap() != Hash::default()
+        if *self.is_t_slot_exist.read().unwrap() {
+            *self.hash.read().unwrap() != Hash::default() && *self.t_hash.read().unwrap() != Hash::default()
+        } else {
+            *self.hash.read().unwrap() != Hash::default()
+        }
+    }
+
+    pub fn is_include_t_slot(&self) -> bool {
+        *self.is_t_slot_exist.read().unwrap()
     }
 
     pub fn freeze_started(&self) -> bool {
@@ -3916,7 +3938,7 @@ impl Bank {
     }
 
     pub fn t_parent_slot(&self) -> Slot {
-        self.t_parent_slot
+        *self.t_parent_slot.read().unwrap()
     }
 
     pub fn parent_hash(&self) -> Hash {
@@ -4095,6 +4117,11 @@ impl Bank {
     /// Return the last block hash registered.
     pub fn last_blockhash(&self) -> Hash {
         self.blockhash_queue.read().unwrap().last_hash()
+    }
+
+    /// Return the block parent hash.
+    pub fn t_parent_hash(&self) -> Hash {
+        *self.t_parent_hash.read().unwrap()
     }
 
     pub fn last_blockhash_and_lamports_per_signature(&self) -> (Hash, u64) {
@@ -7720,6 +7747,11 @@ impl Bank {
         self.block_height
     }
 
+    /// Return the block_height of this bank
+    pub fn t_block_height(&self) -> u64 {
+        *self.t_block_height.read().unwrap()
+    }
+
     /// Return the number of slots per epoch for the given epoch
     pub fn get_slots_in_epoch(&self, epoch: Epoch) -> u64 {
         self.epoch_schedule().get_slots_in_epoch(epoch)
@@ -8313,6 +8345,16 @@ impl Bank {
             }
         }
         false
+    }
+
+    pub fn update_t_slot_related(&self, t_slot: Slot, parent_slot: Slot, t_parent: Arc<Bank>) {
+        *self.t_slot.write().unwrap() = t_slot;
+        *self.t_parent_slot.write().unwrap() = parent_slot;
+        *self.t_block_height.write().unwrap() += 1;
+        // todo, this two args may not use in rc, if so, remove this 2 args later, add by jesse
+        *self.rc.t_slot.write().unwrap() = t_slot;
+        *self.rc.t_parent.write().unwrap() = Some(t_parent.clone());
+        *self.is_t_slot_exist.write().unwrap() = true;
     }
 }
 

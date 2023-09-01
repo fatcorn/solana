@@ -197,6 +197,10 @@ pub struct ForkProgress {
     // so these stats do not span all of time
     pub num_blocks_on_fork: u64,
     pub num_dropped_blocks_on_fork: u64,
+    // t_fork_stats maybe not need, add by jesse
+    // pub t_fork_stats: ForkStats,
+    pub linked_t_slot: Option<Slot>,
+    pub t_replay_progress: Arc<RwLock<ConfirmationProgress>>,
 }
 
 impl ForkProgress {
@@ -206,6 +210,7 @@ impl ForkProgress {
         validator_stake_info: Option<ValidatorStakeInfo>,
         num_blocks_on_fork: u64,
         num_dropped_blocks_on_fork: u64,
+        t_last_entry: Hash,
     ) -> Self {
         let (
             is_leader_slot,
@@ -252,6 +257,9 @@ impl ForkProgress {
                 retry_time: Instant::now(),
                 retry_iteration: 0u32,
             },
+            linked_t_slot: None,
+            // Although this slot not include t slot, build a t_replay_progress won't generate influence
+            t_replay_progress: Arc::new(RwLock::new(ConfirmationProgress::new(t_last_entry))),
         }
     }
 
@@ -281,10 +289,15 @@ impl ForkProgress {
             validator_stake_info,
             num_blocks_on_fork,
             num_dropped_blocks_on_fork,
+            // todo, replace t_lasht_blaockhash() later, add by jesse
+            bank.t_parent_hash(),
         );
 
         if bank.is_frozen() {
             new_progress.fork_stats.bank_hash = Some(bank.hash());
+            if bank.is_include_t_slot() {
+                new_progress.fork_stats.t_bank_hash = Some(bank.t_hash());
+            }
         }
         new_progress
     }
@@ -307,6 +320,9 @@ pub struct ForkStats {
     pub lockout_intervals: LockoutIntervals,
     pub bank_hash: Option<Hash>,
     pub my_latest_landed_vote: Option<Slot>,
+
+    // t slot info
+    pub t_bank_hash: Option<Hash>,
 }
 
 #[derive(Clone, Default)]

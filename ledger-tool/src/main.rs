@@ -224,7 +224,8 @@ fn output_slot(
     verbose_level: u64,
     all_program_ids: &mut HashMap<Pubkey, u64>,
 ) -> Result<(), String> {
-    if blockstore.is_dead(slot) {
+    // todo, input valid args later, add by jesse
+    if blockstore.is_dead(slot, false) {
         if allow_dead_slots {
             if *method == LedgerOutputMethod::Print {
                 println!(" Slot is dead");
@@ -234,8 +235,9 @@ fn output_slot(
         }
     }
 
+    // todo, input effect value later, add by jesse
     let (entries, num_shreds, is_full) = blockstore
-        .get_slot_entries_with_shred_info(slot, 0, allow_dead_slots)
+        .get_slot_entries_with_shred_info(slot, 0, allow_dead_slots, false)
         .map_err(|err| format!("Failed to load entries for slot {slot}: {err:?}"))?;
 
     if *method == LedgerOutputMethod::Print {
@@ -897,12 +899,13 @@ fn print_blockstore_file_metadata(
 }
 
 fn compute_slot_cost(blockstore: &Blockstore, slot: Slot) -> Result<(), String> {
-    if blockstore.is_dead(slot) {
+    // todo, input valid args later, add by jesse
+    if blockstore.is_dead(slot, false) {
         return Err("Dead slot".to_string());
     }
-
+    // todo, input effect value later, add by jesse
     let (entries, _num_shreds, _is_full) = blockstore
-        .get_slot_entries_with_shred_info(slot, 0, false)
+        .get_slot_entries_with_shred_info(slot, 0, false, false)
         .map_err(|err| format!(" Slot: {slot}, Failed to load entries, err {err:?}"))?;
 
     let num_entries = entries.len();
@@ -956,8 +959,9 @@ fn compute_slot_cost(blockstore: &Blockstore, slot: Slot) -> Result<(), String> 
 
 /// Returns true if the supplied slot contains any nonvote transactions
 fn slot_contains_nonvote_tx(blockstore: &Blockstore, slot: Slot) -> bool {
+    // todo, input effect value later, add by jesse
     let (entries, _, _) = blockstore
-        .get_slot_entries_with_shred_info(slot, 0, false)
+        .get_slot_entries_with_shred_info(slot, 0, false, false)
         .expect("Failed to get slot entries");
     let contains_nonvote = entries
         .iter()

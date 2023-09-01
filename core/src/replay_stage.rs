@@ -1,5 +1,6 @@
 //! The `replay_stage` replays transactions broadcast by the leader.
 
+use std::borrow::BorrowMut;
 use {
     crate::{
         banking_trace::BankingTracer,
@@ -1982,6 +1983,7 @@ impl ReplayStage {
         verify_recyclers: &VerifyRecyclers,
         log_messages_bytes_limit: Option<usize>,
         prioritization_fee_cache: &PrioritizationFeeCache,
+        is_virtual: bool,
     ) -> result::Result<usize, BlockstoreProcessorError> {
         let mut w_replay_stats = replay_stats.write().unwrap();
         let mut w_replay_progress = replay_progress.write().unwrap();
@@ -2002,6 +2004,7 @@ impl ReplayStage {
             false,
             log_messages_bytes_limit,
             prioritization_fee_cache,
+            is_virtual
         )?;
         let tx_count_after = w_replay_progress.num_txs;
         let tx_count = tx_count_after - tx_count_before;
@@ -2052,6 +2055,18 @@ impl ReplayStage {
         blockstore
             .set_dead_slot(slot)
             .expect("Failed to mark slot as dead in blockstore");
+
+        blockstore
+            .set_dead_slot(slot)
+            .expect("Failed to mark slot as dead in blockstore");
+
+        // todo, check in context, this only set t slot dead in column cf, may do other ting like v_slot,
+        // todo, or, not use t_dead_slot_cf, only use v dead slot, this will fix is_dead() back in comfirm_slot, add by jesse
+        if bank.is_include_t_slot() {
+            blockstore
+                .set_t_dead_slot(bank.t_slot())
+                .expect("Failed to mark t slot as dead in blockstore");
+        }
 
         blockstore.slots_stats.mark_dead(slot);
 
@@ -2529,6 +2544,7 @@ impl ReplayStage {
         active_bank_slots: &[Slot],
         prioritization_fee_cache: &PrioritizationFeeCache,
     ) -> Vec<ReplaySlotFromBlockstore> {
+        let is_virtual = false;
         // Make mutable shared structures thread safe.
         let progress = RwLock::new(progress);
         let longest_replay_time_us = AtomicU64::new(0);
@@ -2605,6 +2621,7 @@ impl ReplayStage {
                             &verify_recyclers.clone(),
                             log_messages_bytes_limit,
                             prioritization_fee_cache,
+                            is_virtual
                         );
                         replay_blockstore_time.stop();
                         replay_result.replay_result = Some(blockstore_result);
@@ -2638,6 +2655,7 @@ impl ReplayStage {
         bank_slot: Slot,
         prioritization_fee_cache: &PrioritizationFeeCache,
     ) -> ReplaySlotFromBlockstore {
+        let is_virtual = true;
         let mut replay_result = ReplaySlotFromBlockstore {
             is_slot_dead: false,
             bank_slot,
@@ -2663,7 +2681,7 @@ impl ReplayStage {
                     stats.num_dropped_blocks_on_fork + new_dropped_blocks;
                 (num_blocks_on_fork, num_dropped_blocks_on_fork)
             };
-
+            // progress only use the v_slot as the key, add by jesse
             let bank_progress = progress.entry(bank.slot()).or_insert_with(|| {
                 ForkProgress::new_from_bank(
                     bank,
@@ -2674,20 +2692,31 @@ impl ReplayStage {
                     num_dropped_blocks_on_fork,
                 )
             });
+            // Update the bank_progress linked_t_slot if this is a t slot
+            // todo, check, this use is_include_t_slot is ok, consider, read status is correct? if not, replace is_virtual, add by jesse
+            if bank.is_include_t_slot() && bank_progress.linked_t_slot.is_none() {
+                bank_progress.linked_t_slot = Some(bank.t_slot())
+            }
 
+            let replay_progress = if is_virtual {
+                &bank_progress.replay_progress
+            } else {
+                &bank_progress.t_replay_progress
+            };
             if bank.collector_id() != my_pubkey {
                 let mut replay_blockstore_time = Measure::start("replay_blockstore_into_bank");
                 let blockstore_result = Self::replay_blockstore_into_bank(
                     bank,
                     blockstore,
                     &bank_progress.replay_stats,
-                    &bank_progress.replay_progress,
+                    replay_progress,
                     transaction_status_sender,
                     entry_notification_sender,
                     &replay_vote_sender.clone(),
                     &verify_recyclers.clone(),
                     log_messages_bytes_limit,
                     prioritization_fee_cache,
+                    is_virtual
                 );
                 replay_blockstore_time.stop();
                 replay_result.replay_result = Some(blockstore_result);
@@ -2914,14 +2943,16 @@ impl ReplayStage {
         purge_repair_slot_counter: &mut PurgeRepairSlotCounter,
     ) -> bool /* completed a bank */ {
         let active_bank_slots = bank_forks.read().unwrap().active_bank_slots();
+        let t_active_bank_slots = bank_forks.read().unwrap().t_active_bank_slots();
         let num_active_banks = active_bank_slots.len();
+        let t_num_active_banks = t_active_bank_slots.len();
         trace!(
             "{} active bank(s) to replay: {:?}",
             num_active_banks,
             active_bank_slots
         );
-        if num_active_banks > 0 {
-            let replay_result_vec = if num_active_banks > 1 && replay_slots_concurrently {
+        let mut replay_slots = |active_bank_slots: Vec<Slot>, is_virtual: bool, block_metadata_notifier: Option<BlockMetadataNotifierLock>,| {
+            let replay_result_vec = if active_bank_slots.len() > 1 && replay_slots_concurrently {
                 Self::replay_active_banks_concurrently(
                     blockstore,
                     bank_forks,
@@ -2983,6 +3014,14 @@ impl ReplayStage {
                 &replay_result_vec,
                 purge_repair_slot_counter,
             )
+        };
+        // First do t slots, and t slots may not complete a bank, todo check later, add by jesse
+        if t_num_active_banks > 0 {
+            replay_slots(t_active_bank_slots, false, block_metadata_notifier.clone());
+        }
+
+        if num_active_banks > 0 {
+            replay_slots(active_bank_slots, true, block_metadata_notifier.clone())
         } else {
             false
         }
@@ -3830,6 +3869,33 @@ impl ReplayStage {
                 new_banks.insert(child_slot, child_bank);
             }
         }
+        // update the v_bank and get t_bank
+        let mut t_bank_linked_bank_slots = vec![];
+        for (t_parent_slot, t_children) in t_next_slots {
+            let parent_bank = t_frozen_banks
+                .get(&t_parent_slot)
+                .expect("missing parent in bank forks")
+                .clone();
+            let t_slots_with_linked_slot = blockstore.get_t_slots_with_linked_slots(&t_children).expect("Get t_slot failed");
+            for (t_slot, linked_slot) in t_slots_with_linked_slot {
+                let mut v_bank = new_banks.get(&linked_slot);
+                if v_bank.is_none() {
+                    let mut w_forks = bank_forks.write().unwrap();
+                    let inner_v_bank = w_forks.get(linked_slot);
+                    if inner_v_bank.is_none() {
+                        continue;
+                    }
+                    let inner_v_bank = inner_v_bank.unwrap();
+                    inner_v_bank.update_t_slot_related(t_slot, t_parent_slot, parent_bank.clone());
+                    t_bank_linked_bank_slots.push(linked_slot);
+                    drop(w_forks);
+                } else {
+                    let v_bank = v_bank.unwrap();
+                    v_bank.update_t_slot_related(t_slot, t_parent_slot, parent_bank.clone());
+                    t_bank_linked_bank_slots.push(linked_slot);
+                }
+            }
+        }
 
         drop(forks);
         generate_new_bank_forks_loop.stop();
@@ -3839,6 +3905,11 @@ impl ReplayStage {
         let mut forks = bank_forks.write().unwrap();
         for (_, bank) in new_banks {
             forks.insert(bank);
+        }
+        // add bank to t_banks
+        for linked_slot in t_bank_linked_bank_slots {
+            let bank = forks.get(linked_slot).unwrap();
+            forks.insert_to_t_banks(bank.clone());
         }
         generate_new_bank_forks_write_lock.stop();
         saturating_add_assign!(
@@ -4623,6 +4694,7 @@ pub(crate) mod tests {
             blockstore.insert_shreds(shreds, None, false).unwrap();
             let block_commitment_cache = Arc::new(RwLock::new(BlockCommitmentCache::default()));
             let exit = Arc::new(AtomicBool::new(false));
+            // todo, this func seem like only used in tests, given default value, check later, add by jesse
             let res = ReplayStage::replay_blockstore_into_bank(
                 &bank1,
                 &blockstore,
@@ -4634,6 +4706,7 @@ pub(crate) mod tests {
                 &VerifyRecyclers::default(),
                 None,
                 &PrioritizationFeeCache::new(0u64),
+                false
             );
             let max_complete_transaction_status_slot = Arc::new(AtomicU64::default());
             let max_complete_rewards_slot = Arc::new(AtomicU64::default());
@@ -4672,7 +4745,8 @@ pub(crate) mod tests {
                 .unwrap_or(false));
 
             // Check that the erroring bank was marked as dead in blockstore
-            assert!(blockstore.is_dead(bank1.slot()));
+            // todo, this func seem like only used in tests, given default value, check later, add by jesse
+            assert!(blockstore.is_dead(bank1.slot(), false));
             res.map(|_| ())
         };
         let _ignored = remove_dir_all(ledger_path);

@@ -143,6 +143,14 @@ impl BankForks {
             .collect()
     }
 
+    pub fn t_active_bank_slots(&self) -> Vec<Slot> {
+        self.t_banks
+            .iter()
+            .filter(|(_, v)| !v.is_frozen())
+            .map(|(k, _v)| *k)
+            .collect()
+    }
+
     pub fn get(&self, bank_slot: Slot) -> Option<Arc<Bank>> {
         self.banks.get(&bank_slot).cloned()
     }
@@ -227,6 +235,7 @@ impl BankForks {
     }
 
     pub fn insert(&mut self, mut bank: Bank) -> Arc<Bank> {
+        // todo, figure this member use for what? add by jesse
         bank.check_program_modification_slot =
             self.root.load(Ordering::Relaxed) < self.highest_slot_at_startup;
 
@@ -237,6 +246,17 @@ impl BankForks {
         self.descendants.entry(slot).or_default();
         for parent in bank.proper_ancestors() {
             self.descendants.entry(parent).or_default().insert(slot);
+        }
+        bank
+    }
+
+    pub fn insert_to_t_banks(&mut self, bank: Arc<Bank>) -> Arc<Bank> {
+        let prev = self.t_banks.insert(bank.t_slot(), bank.clone());
+        assert!(prev.is_none());
+        let slot = bank.t_slot();
+        self.t_descendants.entry(slot).or_default();
+        for t_parent in bank.t_proper_ancestors() {
+            self.t_descendants.entry(t_parent).or_default().insert(slot);
         }
         bank
     }
