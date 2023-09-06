@@ -7126,9 +7126,9 @@ impl Bank {
         let mut signature_count_buf = [0u8; 8];
         LittleEndian::write_u64(&mut signature_count_buf[..], self.signature_count());
 
-
+        let parent_hash = if is_virtual { self.parent_hash } else { self.t_parent_hash() };
         let mut hash = hashv(&[
-            if is_virtual { self.parent_hash.as_ref() } else { self.t_parent_hash.read().unwrap().as_ref() },
+            parent_hash.as_ref(),
             accounts_delta_hash.0.as_ref(),
             &signature_count_buf,
             self.last_blockhash().as_ref(),

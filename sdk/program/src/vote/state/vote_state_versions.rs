@@ -32,7 +32,10 @@ impl VoteStateVersions {
 
                     root_slot: state.root_slot,
 
+
                     /// the signer for vote transactions
+                    // todo, input valid args, add by jesse
+                    t_root_slot: None,
                     authorized_voters,
 
                     /// history of prior authorized voters and the epochs for which
@@ -57,7 +60,8 @@ impl VoteStateVersions {
                 votes: Self::landed_votes_from_lockouts(state.votes),
 
                 root_slot: state.root_slot,
-
+                // todo, input valid args, add by jesse
+                t_root_slot: None,
                 authorized_voters: state.authorized_voters.clone(),
 
                 prior_voters: state.prior_voters,

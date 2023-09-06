@@ -1104,7 +1104,8 @@ mod tests {
                 switch_proof_hash,
             );
             votes_sender.send(vec![vote_tx]).unwrap();
-            let replay_vote = Vote::new(replay_vote_slots.clone(), Hash::default());
+            // TODO, check, input valid args, add by jesse
+            let replay_vote = Vote::new(replay_vote_slots.clone(), Hash::default(), vec![], None);
             // Send same vote twice, but should only notify once
             for _ in 0..2 {
                 replay_votes_sender

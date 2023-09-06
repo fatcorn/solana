@@ -3044,6 +3044,11 @@ impl ReplayStage {
         let mut new_stats = vec![];
         for bank in frozen_banks {
             let bank_slot = bank.slot();
+            let bank_t_slot = if bank.is_include_t_slot() {
+                Some(bank.t_slot())
+            } else {
+                None
+            };
             // Only time progress map should be missing a bank slot
             // is if this node was the leader for this slot as those banks
             // are not replayed in replay_active_banks()
@@ -3120,8 +3125,11 @@ impl ReplayStage {
                         bank_slot,
                         &bank.vote_accounts(),
                         ancestors,
+                        // todo, check, this place not need latest_validator_votes_for_frozen_banks both come from local, so do not need
+                        // todo check the t slot hash, if t_slot_hash checked in contract. add by jesse
                         |slot| progress.get_hash(slot),
                         latest_validator_votes_for_frozen_banks,
+                        bank_t_slot
                     );
                     // Notify any listeners of the votes found in this newly computed
                     // bank

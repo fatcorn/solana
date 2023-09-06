@@ -420,9 +420,11 @@ fn check_update_vote_state_slots_are_valid(
 
 fn check_slots_are_valid(
     vote_state: &VoteState,
-    vote_slots: &[Slot],
+    vote_slots: &[(Slot, Option<Slot>)],
     vote_hash: &Hash,
     slot_hashes: &[(Slot, Hash)],
+    t_slot_hashes: &[(Slot, Hash)],
+    t_vote_hash: &Option<Hash>,
 ) -> Result<(), VoteError> {
     // index into the vote's slots, starting at the oldest
     // slot
@@ -431,6 +433,8 @@ fn check_slots_are_valid(
     // index into the slot_hashes, starting at the oldest known
     // slot hash
     let mut j = slot_hashes.len();
+
+    let mut t = t_slot_hashes.len();
 
     // Note:
     //
@@ -444,8 +448,17 @@ fn check_slots_are_valid(
         // 1) increment `i` to find the smallest slot `s` in `vote_slots`
         // where `s` >= `last_voted_slot`
         if vote_state
-            .last_voted_slot()
-            .map_or(false, |last_voted_slot| vote_slots[i] <= last_voted_slot)
+            .last_lockout()
+            .map_or(false, |last_voted_slot| {
+                    if vote_slots[i].1.is_some() {
+                        if last_voted_slot.t_slot().is_none() {
+                            return false;
+                        }
+                        return vote_slots[i].0 <= last_voted_slot.slot() && vote_slots[i].1.unwrap() <= last_voted_slot.t_slot().unwrap()
+                    }
+                    vote_slots[i].0 <= last_voted_slot.slot()
+                }
+            )
         {
             i = i
                 .checked_add(1)
@@ -454,13 +467,20 @@ fn check_slots_are_valid(
         }
 
         // 2) Find the hash for this slot `s`.
-        if vote_slots[i] != slot_hashes[j.checked_sub(1).expect("`j` is positive")].0 {
+        if vote_slots[i].0 != slot_hashes[j.checked_sub(1).expect("`j` is positive")].0 {
             // Decrement `j` to find newer slots
             j = j
                 .checked_sub(1)
                 .expect("`j` is positive when finding newer slots");
             continue;
         }
+
+        if vote_slots[i].1.is_some() && vote_slots[i].1.unwrap() != t_slot_hashes[t.checked_sub(1).expect("`t` is positive")].0 {
+            t = t
+                .checked_sub(t)
+                .expect("`t` is positive when finding newer slots");
+        }
+
 
         // 3) Once the hash for `s` is found, bump `s` to the next slot
         // in `vote_slots` and continue.
@@ -470,6 +490,10 @@ fn check_slots_are_valid(
         j = j
             .checked_sub(1)
             .expect("`j` is positive when hash is found");
+
+        t = t
+            .checked_sub(1)
+            .expect("`t` is positive when hash is found");
     }
 
     if j == slot_hashes.len() {
@@ -482,6 +506,18 @@ fn check_slots_are_valid(
         );
         return Err(VoteError::VoteTooOld);
     }
+    // if t_vote_hash is none,  t always eq th t_slot_hash len, else it means not found same slot in t_slot_hashes
+    if t == t_slot_hashes.len() && t_vote_hash.is_some() {
+        // This means we never made it to steps 2) or 3) above, otherwise
+        // `t` would have been decremented at least once. This means
+        // there are not slots in `vote_slots` greater than `last_voted_slot`
+        debug!(
+            "{} dropped vote t_slots {:?}, vote t_hash: {:?} slot hashes:SlotHash {:?}, too old ",
+            vote_state.node_pubkey, vote_slots, t_vote_hash, t_slot_hashes
+        );
+        return Err(VoteError::VoteTooOld);
+    }
+
     if i != vote_slots.len() {
         // This means there existed some slot for which we couldn't find
         // a matching slot hash in step 2)
@@ -503,6 +539,19 @@ fn check_slots_are_valid(
         inc_new_counter_info!("dropped-vote-hash", 1);
         return Err(VoteError::SlotHashMismatch);
     }
+    if t < t_slot_hashes.len() && t_slot_hashes[t].1 != t_vote_hash.expect("t vote hash should exist") {
+        // This means the newest  t slot in the `vote_slots` has a match that
+        // doesn't match the expected hash for that slot on this
+        // fork
+        warn!(
+            "{} dropped vote slots {:?} failed to match hash {:?} {}",
+            vote_state.node_pubkey, vote_slots, t_vote_hash, slot_hashes[t].1
+        );
+        inc_new_counter_info!("dropped-vote-hash", 1);
+        // todo, add new error, add by jesse
+        return Err(VoteError::SlotHashMismatch);
+    }
+
     Ok(())
 }
 
@@ -735,16 +784,17 @@ pub fn process_new_vote_state(
 
 fn process_vote_unfiltered(
     vote_state: &mut VoteState,
-    vote_slots: &[Slot],
+    vote_slots: &[(Slot, Option<Slot>)],
     vote: &Vote,
     slot_hashes: &[SlotHash],
     epoch: Epoch,
     current_slot: Slot,
 ) -> Result<(), VoteError> {
-    check_slots_are_valid(vote_state, vote_slots, &vote.hash, slot_hashes)?;
+    // todo, check, input t_slot_hashes? add by jesse
+    check_slots_are_valid(vote_state, vote_slots, &vote.hash, slot_hashes, slot_hashes,&vote.t_hash)?;
     vote_slots
         .iter()
-        .for_each(|s| vote_state.process_next_vote_slot(*s, epoch, current_slot));
+        .for_each(|(s, t_slot)| vote_state.process_next_vote_slot(*s, epoch, current_slot, *t_slot));
     Ok(())
 }
 
@@ -759,12 +809,30 @@ pub fn process_vote(
         return Err(VoteError::EmptySlots);
     }
     let earliest_slot_in_history = slot_hashes.last().map(|(slot, _hash)| *slot).unwrap_or(0);
-    let vote_slots = vote
+
+    let mut t_slots = vec![] ;
+    for t_slot in &vote.t_slots {
+        t_slots.push(Some(*t_slot));
+    }
+    if vote.t_slots.is_empty() {
+        for i in 0..vote.slots.len() {
+            // todo, check, now, t_slots may not continuous, may like [1, None, 3], so may change to t_slots: Vec<Option<Slot>> later,
+            // todo, and then, not need deal in here add by jesse
+            t_slots.push(None);
+        }
+    }
+    if t_slots.len() != vote.slots.len() {
+        // todo, add new err, add by jesse
+        return Err(VoteError::EmptySlots);
+    }
+
+    let vote_slots  = vote
         .slots
         .iter()
-        .filter(|slot| **slot >= earliest_slot_in_history)
-        .cloned()
-        .collect::<Vec<Slot>>();
+        .zip(t_slots.iter())
+        .filter(|(slot, t_slot)| **slot >= earliest_slot_in_history)
+        .map(|x| (x.0.clone(), x.1.clone()))
+        .collect::<Vec<_>>();
     if vote_slots.is_empty() {
         return Err(VoteError::VotesTooOldAllFiltered);
     }
@@ -783,10 +851,24 @@ pub fn process_vote_unchecked(vote_state: &mut VoteState, vote: Vote) {
     if vote.slots.is_empty() {
         return;
     }
+    let mut t_slots = vote.t_slots.iter().map(|s| Some(*s)).collect::<Vec<Option<Slot>>>();
+    if vote.t_slots.is_empty() {
+        for _ in 0..vote.slots.len() {
+            t_slots.push(None);
+        }
+    }
+    let vote_slots = vote
+        .slots
+        .iter()
+        .zip(t_slots.iter())
+        .map(|x| (x.0.clone(), x.1.clone()))
+        .collect::<Vec<(Slot, Option<Slot>)>>();
+
+    // todo, check, need t_hash? add by jesse
     let slot_hashes: Vec<_> = vote.slots.iter().rev().map(|x| (*x, vote.hash)).collect();
     let _ignored = process_vote_unfiltered(
         vote_state,
-        &vote.slots,
+        &vote_slots,
         &vote,
         &slot_hashes,
         vote_state.current_epoch(),
@@ -797,12 +879,18 @@ pub fn process_vote_unchecked(vote_state: &mut VoteState, vote: Vote) {
 #[cfg(test)]
 pub fn process_slot_votes_unchecked(vote_state: &mut VoteState, slots: &[Slot]) {
     for slot in slots {
-        process_slot_vote_unchecked(vote_state, *slot);
+        process_slot_vote_unchecked(vote_state, *slot, None);
     }
 }
 
-pub fn process_slot_vote_unchecked(vote_state: &mut VoteState, slot: Slot) {
-    process_vote_unchecked(vote_state, Vote::new(vec![slot], Hash::default()));
+pub fn process_slot_vote_unchecked(vote_state: &mut VoteState, slot: Slot, t_slot: Option<Slot>) {
+    let t_slots = if t_slot.is_some() {
+        vec![t_slot.unwrap()]
+    } else {
+        vec![]
+    };
+    // TODO, check, input valid args, add by jesse
+    process_vote_unchecked(vote_state, Vote::new(vec![slot], Hash::default(), t_slots, None));
 }
 
 /// Authorize the given pubkey to withdraw or sign votes. This may be called multiple times,
@@ -1485,9 +1573,12 @@ mod tests {
         let start = vote_state.votes.len().saturating_sub(MAX_RECENT_VOTES);
         (start..vote_state.votes.len())
             .map(|i| {
+                // TODO, check, input valid args, add by jesse
                 Vote::new(
                     vec![vote_state.votes.get(i).unwrap().slot()],
                     Hash::default(),
+                    vec![],
+                    None
                 )
             })
             .collect()

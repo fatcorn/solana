@@ -524,7 +524,8 @@ mod tests {
     /// Returns Vec of serialized VoteInstruction and flag indicating if it is a vote state update
     /// variant, along with the original vote
     fn create_serialized_votes() -> (Vote, Vec<(Vec<u8>, bool)>) {
-        let vote = Vote::new(vec![1], Hash::default());
+        // TODO, check, input valid args, add by jesse, seem like only use in tests
+        let vote = Vote::new(vec![1], Hash::default(), vec![], None);
         let vote_state_update = VoteStateUpdate::from(vec![(1, 1)]);
         (
             vote.clone(),

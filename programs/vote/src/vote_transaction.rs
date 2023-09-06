@@ -20,7 +20,8 @@ pub fn new_vote_transaction(
     authorized_voter_keypair: &Keypair,
     switch_proof_hash: Option<Hash>,
 ) -> Transaction {
-    let votes = Vote::new(slots, bank_hash);
+    // TODO, check, input valid args, add by jesse
+    let votes = Vote::new(slots, bank_hash, vec![], None);
     let vote_ix = if let Some(switch_proof_hash) = switch_proof_hash {
         vote::instruction::vote_switch(
             &vote_keypair.pubkey(),

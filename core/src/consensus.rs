@@ -314,6 +314,7 @@ impl Tower {
         ancestors: &HashMap<Slot, HashSet<Slot>>,
         get_frozen_hash: impl Fn(Slot) -> Option<Hash>,
         latest_validator_votes_for_frozen_banks: &mut LatestValidatorVotesForFrozenBanks,
+        bank_t_slot: Option<Slot>,
     ) -> ComputedBankState {
         let mut vote_slots = HashSet::new();
         let mut voted_stakes = HashMap::new();
@@ -386,7 +387,7 @@ impl Tower {
                 );
             }
 
-            process_slot_vote_unchecked(&mut vote_state, bank_slot);
+            process_slot_vote_unchecked(&mut vote_state, bank_slot, bank_t_slot);
 
             for vote in &vote_state.votes {
                 bank_weight += vote.lockout.lockout() as u128 * voted_stake as u128;
@@ -395,15 +396,17 @@ impl Tower {
 
             if start_root != vote_state.root_slot {
                 if let Some(root) = start_root {
+                    // TODO, input valid args, add by jesse
                     let vote =
-                        Lockout::new_with_confirmation_count(root, MAX_LOCKOUT_HISTORY as u32);
+                        Lockout::new_with_confirmation_count(root, MAX_LOCKOUT_HISTORY as u32, None);
                     trace!("ROOT: {}", vote.slot());
                     bank_weight += vote.lockout() as u128 * voted_stake as u128;
                     vote_slots.insert(vote.slot());
                 }
             }
             if let Some(root) = vote_state.root_slot {
-                let vote = Lockout::new_with_confirmation_count(root, MAX_LOCKOUT_HISTORY as u32);
+                // TODO, input valid args, add by jesse
+                let vote = Lockout::new_with_confirmation_count(root, MAX_LOCKOUT_HISTORY as u32, None);
                 bank_weight += vote.lockout() as u128 * voted_stake as u128;
                 vote_slots.insert(vote.slot());
             }
@@ -520,7 +523,8 @@ impl Tower {
         hash: Hash,
         last_voted_slot_in_bank: Option<Slot>,
     ) -> VoteTransaction {
-        let vote = Vote::new(vec![slot], hash);
+        // TODO, input valid args, add by jesse
+        let vote = Vote::new(vec![slot], hash, vec![], None);
         process_vote_unchecked(local_vote_state, vote);
         let slots = if let Some(last_voted_slot) = last_voted_slot_in_bank {
             local_vote_state
@@ -532,7 +536,8 @@ impl Tower {
         } else {
             local_vote_state.votes.iter().map(|v| v.slot()).collect()
         };
-        VoteTransaction::from(Vote::new(slots, hash))
+        // TODO, input valid args, add by jesse
+        VoteTransaction::from(Vote::new(slots, hash, vec![], None))
     }
 
     pub fn last_voted_slot_in_bank(bank: &Bank, vote_account_pubkey: &Pubkey) -> Option<Slot> {
@@ -565,7 +570,8 @@ impl Tower {
         let old_root = self.root();
 
         let mut new_vote = if is_direct_vote_state_update_enabled {
-            let vote = Vote::new(vec![vote_slot], vote_hash);
+            // TODO, input valid args, add by jesse
+            let vote = Vote::new(vec![vote_slot], vote_hash, vec![], None);
             process_vote_unchecked(&mut self.vote_state, vote);
             VoteTransaction::from(VoteStateUpdate::new(
                 self.vote_state
@@ -703,7 +709,8 @@ impl Tower {
         // remaining voted slots are on a different fork from the checked slot,
         // it's still locked out.
         let mut vote_state = self.vote_state.clone();
-        process_slot_vote_unchecked(&mut vote_state, slot);
+        // todo,check input valid args, add by jesse
+        process_slot_vote_unchecked(&mut vote_state, slot, None);
         for vote in &vote_state.votes {
             if slot != vote.slot() && !ancestors.contains(&vote.slot()) {
                 return true;
@@ -1087,7 +1094,8 @@ impl Tower {
         total_stake: Stake,
     ) -> ThresholdDecision {
         let mut vote_state = self.vote_state.clone();
-        process_slot_vote_unchecked(&mut vote_state, slot);
+        // todo,check input valid args, add by jesse
+        process_slot_vote_unchecked(&mut vote_state, slot,None);
         let lockout = vote_state.nth_recent_lockout(self.threshold_depth);
         if let Some(lockout) = lockout {
             if let Some(fork_stake) = voted_stakes.get(&lockout.slot()) {
@@ -1587,7 +1595,8 @@ pub mod test {
                 });
                 let mut vote_state = VoteState::default();
                 for slot in *votes {
-                    process_slot_vote_unchecked(&mut vote_state, *slot);
+                    // todo,check input valid args, add by jesse
+                    process_slot_vote_unchecked(&mut vote_state, *slot, None);
                 }
                 VoteState::serialize(
                     &VoteStateVersions::new_current(vote_state),

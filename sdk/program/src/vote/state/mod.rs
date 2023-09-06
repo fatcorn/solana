@@ -47,21 +47,24 @@ pub struct Vote {
     /// A stack of votes starting with the oldest vote with votes(virtual) slot
     pub slots: Vec<Slot>,
     /// A stack of votes starting with the oldest vote with transaction(real) slot
-    // pub t_slots: Vec<Slot>,
+    pub t_slots: Vec<Slot>,
     /// signature of the bank's state at the last slot
     pub hash: Hash,
+    /// signature of the truly bank's state at the last slot
+    pub t_hash: Option<Hash>,
     /// processing timestamp of last slot
     pub timestamp: Option<UnixTimestamp>,
 }
 
 impl Vote {
-    pub fn new(slots: Vec<Slot>, hash: Hash) -> Self {
+    pub fn new(slots: Vec<Slot>, hash: Hash, t_slots: Vec<Slot>, t_hash: Option<Hash>) -> Self {
         Self {
             slots,
-            //v_slots: slots,
-            // t_slots: t_slots,
+            t_slots,
             hash,
+            t_hash,
             timestamp: None,
+
         }
     }
 
@@ -74,17 +77,19 @@ impl Vote {
 pub struct Lockout {
     slot: Slot,
     confirmation_count: u32,
+    t_slot: Option<Slot>,
 }
 
 impl Lockout {
-    pub fn new(slot: Slot) -> Self {
-        Self::new_with_confirmation_count(slot, 1)
+    pub fn new(slot: Slot, t_slot: Option<Slot>) -> Self {
+        Self::new_with_confirmation_count(slot, 1, t_slot)
     }
 
-    pub fn new_with_confirmation_count(slot: Slot, confirmation_count: u32) -> Self {
+    pub fn new_with_confirmation_count(slot: Slot, confirmation_count: u32, t_slot: Option<Slot>) -> Self {
         Self {
             slot,
             confirmation_count,
+            t_slot,
         }
     }
 
@@ -106,6 +111,10 @@ impl Lockout {
 
     pub fn slot(&self) -> Slot {
         self.slot
+    }
+
+    pub fn t_slot(&self) -> Option<Slot> {
+        self.t_slot
     }
 
     pub fn confirmation_count(&self) -> u32 {
@@ -169,7 +178,8 @@ impl From<Vec<(Slot, u32)>> for VoteStateUpdate {
         let lockouts: VecDeque<Lockout> = recent_slots
             .into_iter()
             .map(|(slot, confirmation_count)| {
-                Lockout::new_with_confirmation_count(slot, confirmation_count)
+                // TODO, input valid args, add by jesse
+                Lockout::new_with_confirmation_count(slot, confirmation_count, None)
             })
             .collect();
         Self {
@@ -301,6 +311,8 @@ pub struct VoteState {
     // This usually the last Lockout which was popped from self.votes.
     // However, it can be arbitrary slot, when being used inside Tower
     pub root_slot: Option<Slot>,
+
+    pub t_root_slot: Option<Slot>,
 
     /// the signer for vote transactions
     authorized_voters: AuthorizedVoters,
@@ -434,6 +446,7 @@ impl VoteState {
         next_vote_slot: Slot,
         epoch: Epoch,
         current_slot: Slot,
+        next_vote_t_slot: Option<Slot>,
     ) {
         // Ignore votes for slots earlier than we already have votes for
         if self
@@ -447,7 +460,8 @@ impl VoteState {
 
         let landed_vote = LandedVote {
             latency: Self::compute_vote_latency(next_vote_slot, current_slot),
-            lockout: Lockout::new(next_vote_slot),
+            // TODO, input valid args, add by jesse
+            lockout: Lockout::new(next_vote_slot, next_vote_t_slot),
         };
 
         // Once the stack is full, pop the oldest lockout and distribute rewards
@@ -455,6 +469,9 @@ impl VoteState {
             let credits = self.credits_for_vote_at_index(0);
             let landed_vote = self.votes.pop_front().unwrap();
             self.root_slot = Some(landed_vote.slot());
+            if landed_vote.lockout.t_slot.is_some() {
+                self.t_root_slot = Some(landed_vote.lockout.t_slot.unwrap());
+            }
 
             self.increment_credits(epoch, credits);
         }
@@ -786,9 +803,11 @@ pub mod serde_compact_vote_state_update {
                         }
                         Some(slot) => slot,
                     };
+                    // TODO, input valid args, add by jesse
                     let lockout = Lockout::new_with_confirmation_count(
                         *slot,
                         u32::from(lockout_offset.confirmation_count),
+                        None
                     );
                     Some(Ok(lockout))
                 });
