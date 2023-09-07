@@ -169,6 +169,12 @@ declare_process_instruction!(
                 )?;
                 let clock =
                     get_sysvar_with_account_check::clock(invoke_context, instruction_context, 2)?;
+                // todo, add t_slot_hashs account in vote ins
+                let t_slot_hashes = get_sysvar_with_account_check::t_slot_hashes(
+                    invoke_context,
+                    instruction_context,
+                    4,
+                )?;
                 vote_state::process_vote_with_account(
                     &mut me,
                     &slot_hashes,
@@ -176,6 +182,7 @@ declare_process_instruction!(
                     &vote,
                     &signers,
                     &invoke_context.feature_set,
+                    &t_slot_hashes,
                 )
             }
             VoteInstruction::UpdateVoteState(vote_state_update)

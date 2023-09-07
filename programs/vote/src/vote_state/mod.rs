@@ -16,6 +16,7 @@ use {
         pubkey::Pubkey,
         rent::Rent,
         slot_hashes::SlotHash,
+        slot_hashes::TSlotHash,
         sysvar::clock::Clock,
         transaction_context::{
             BorrowedAccount, IndexOfAccount, InstructionContext, TransactionContext,
@@ -789,9 +790,10 @@ fn process_vote_unfiltered(
     slot_hashes: &[SlotHash],
     epoch: Epoch,
     current_slot: Slot,
+    t_slot_hashes: &[TSlotHash],
 ) -> Result<(), VoteError> {
     // todo, check, input t_slot_hashes? add by jesse
-    check_slots_are_valid(vote_state, vote_slots, &vote.hash, slot_hashes, slot_hashes,&vote.t_hash)?;
+    check_slots_are_valid(vote_state, vote_slots, &vote.hash, slot_hashes, t_slot_hashes,&vote.t_hash)?;
     vote_slots
         .iter()
         .for_each(|(s, t_slot)| vote_state.process_next_vote_slot(*s, epoch, current_slot, *t_slot));
@@ -804,6 +806,7 @@ pub fn process_vote(
     slot_hashes: &[SlotHash],
     epoch: Epoch,
     current_slot: Slot,
+    t_slot_hashes: &[TSlotHash],
 ) -> Result<(), VoteError> {
     if vote.slots.is_empty() {
         return Err(VoteError::EmptySlots);
@@ -843,6 +846,7 @@ pub fn process_vote(
         slot_hashes,
         epoch,
         current_slot,
+        t_slot_hashes,
     )
 }
 
@@ -864,8 +868,10 @@ pub fn process_vote_unchecked(vote_state: &mut VoteState, vote: Vote) {
         .map(|x| (x.0.clone(), x.1.clone()))
         .collect::<Vec<(Slot, Option<Slot>)>>();
 
-    // todo, check, need t_hash? add by jesse
+
     let slot_hashes: Vec<_> = vote.slots.iter().rev().map(|x| (*x, vote.hash)).collect();
+    // todo, check, use t_slots get t_slot_hashes is ok? add by jesse
+    let t_slot_hashes: Vec<_> = vote.t_slots.iter().rev().map(|x| (*x, vote.t_hash.unwrap())).collect();
     let _ignored = process_vote_unfiltered(
         vote_state,
         &vote_slots,
@@ -873,6 +879,7 @@ pub fn process_vote_unchecked(vote_state: &mut VoteState, vote: Vote) {
         &slot_hashes,
         vote_state.current_epoch(),
         0,
+        &t_slot_hashes,
     );
 }
 
@@ -1123,10 +1130,11 @@ pub fn process_vote_with_account<S: std::hash::BuildHasher>(
     vote: &Vote,
     signers: &HashSet<Pubkey, S>,
     feature_set: &FeatureSet,
+    t_slot_hashes: &[TSlotHash],
 ) -> Result<(), InstructionError> {
     let mut vote_state = verify_and_get_vote_state(vote_account, clock, signers)?;
 
-    process_vote(&mut vote_state, vote, slot_hashes, clock.epoch, clock.slot)?;
+    process_vote(&mut vote_state, vote, slot_hashes, clock.epoch, clock.slot, t_slot_hashes)?;
     if let Some(timestamp) = vote.timestamp {
         vote.slots
             .iter()

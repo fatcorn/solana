@@ -45,13 +45,15 @@
 //! # Ok::<(), anyhow::Error>(())
 //! ```
 
-pub use crate::slot_hashes::SlotHashes;
+// use solana_program::slot_hashes::TSlotHashes;
+pub use crate::slot_hashes::TSlotHashes;
 use crate::{account_info::AccountInfo, program_error::ProgramError, sysvar::Sysvar};
+use crate::pubkey::Pubkey;
 
 
-crate::declare_sysvar_id!("SysvarS1otHashes111111111111111111111111111", SlotHashes);
+crate::declare_sysvar_id!("SysvarTS1otHashes11111111111111111111111111", TSlotHashes);
 
-impl Sysvar for SlotHashes {
+impl Sysvar for TSlotHashes {
     // override
     fn size_of() -> usize {
         // hard-coded so that we don't have to construct an empty
@@ -73,11 +75,11 @@ mod tests {
     #[test]
     fn test_size_of() {
         assert_eq!(
-            SlotHashes::size_of(),
+            TSlotHashes::size_of(),
             bincode::serialized_size(
                 &(0..MAX_ENTRIES)
                     .map(|slot| (slot as Slot, Hash::default()))
-                    .collect::<SlotHashes>()
+                    .collect::<TSlotHashes>()
             )
             .unwrap() as usize
         );

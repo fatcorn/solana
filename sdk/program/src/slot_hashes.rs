@@ -32,9 +32,15 @@ pub fn set_entries_for_tests_only(entries: usize) {
 
 pub type SlotHash = (Slot, Hash);
 
+pub type TSlotHash = (Slot, Hash);
+
 #[repr(C)]
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Default)]
 pub struct SlotHashes(Vec<SlotHash>);
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Default)]
+pub struct  TSlotHashes(Vec<SlotHash>);
 
 impl SlotHashes {
     pub fn add(&mut self, slot: Slot, hash: Hash) {
@@ -70,6 +76,46 @@ impl FromIterator<(Slot, Hash)> for SlotHashes {
 }
 
 impl Deref for SlotHashes {
+    type Target = Vec<SlotHash>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl TSlotHashes {
+    pub fn add(&mut self, slot: Slot, hash: Hash) {
+        match self.binary_search_by(|(probe, _)| slot.cmp(probe)) {
+            Ok(index) => (self.0)[index] = (slot, hash),
+            Err(index) => (self.0).insert(index, (slot, hash)),
+        }
+        (self.0).truncate(get_entries());
+    }
+    pub fn position(&self, slot: &Slot) -> Option<usize> {
+        self.binary_search_by(|(probe, _)| slot.cmp(probe)).ok()
+    }
+    #[allow(clippy::trivially_copy_pass_by_ref)]
+    pub fn get(&self, slot: &Slot) -> Option<&Hash> {
+        self.binary_search_by(|(probe, _)| slot.cmp(probe))
+            .ok()
+            .map(|index| &self[index].1)
+    }
+    pub fn new(slot_hashes: &[SlotHash]) -> Self {
+        let mut slot_hashes = slot_hashes.to_vec();
+        slot_hashes.sort_by(|(a, _), (b, _)| b.cmp(a));
+        Self(slot_hashes)
+    }
+    pub fn slot_hashes(&self) -> &[SlotHash] {
+        &self.0
+    }
+}
+
+impl FromIterator<(Slot, Hash)> for TSlotHashes {
+    fn from_iter<I: IntoIterator<Item = (Slot, Hash)>>(iter: I) -> Self {
+        Self(iter.into_iter().collect())
+    }
+}
+
+impl Deref for TSlotHashes {
     type Target = Vec<SlotHash>;
     fn deref(&self) -> &Self::Target {
         &self.0

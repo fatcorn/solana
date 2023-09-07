@@ -282,6 +282,7 @@ pub struct BankRc {
 
 #[cfg(RUSTC_WITH_SPECIALIZATION)]
 use solana_frozen_abi::abi_example::AbiExample;
+use solana_sdk::slot_hashes::TSlotHashes;
 
 #[cfg(RUSTC_WITH_SPECIALIZATION)]
 impl AbiExample for BankRc {
@@ -1534,6 +1535,7 @@ impl Bank {
         // Update sysvars before processing transactions
         let (_, update_sysvars_time_us) = measure_us!({
             new.update_slot_hashes();
+            new.update_t_slot_hashes();
             new.update_stake_history(Some(parent_epoch));
             new.update_clock(Some(parent_epoch));
             new.update_fees();
@@ -2302,6 +2304,20 @@ impl Bank {
             slot_hashes.add(self.parent_slot, self.parent_hash);
             create_account(
                 &slot_hashes,
+                self.inherit_specially_retained_account_fields(account),
+            )
+        });
+    }
+
+    fn update_t_slot_hashes(&self) {
+        self.update_sysvar_account(&sysvar::t_slot_hashes::id(), |account| {
+            let mut t_slot_hashes = account
+                .as_ref()
+                .map(|account| from_account::<TSlotHashes, _>(account).unwrap())
+                .unwrap_or_default();
+            t_slot_hashes.add(self.t_parent_slot(), self.t_parent_hash());
+            create_account(
+                &t_slot_hashes,
                 self.inherit_specially_retained_account_fields(account),
             )
         });

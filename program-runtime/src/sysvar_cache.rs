@@ -15,6 +15,7 @@ use {
     },
     std::sync::Arc,
 };
+use solana_sdk::slot_hashes::TSlotHashes;
 
 #[cfg(RUSTC_WITH_SPECIALIZATION)]
 impl ::solana_frozen_abi::abi_example::AbiExample for SysvarCache {
@@ -33,6 +34,7 @@ pub struct SysvarCache {
     fees: Option<Arc<Fees>>,
     rent: Option<Arc<Rent>>,
     slot_hashes: Option<Arc<SlotHashes>>,
+    t_slot_hashes: Option<Arc<TSlotHashes>>,
     #[allow(deprecated)]
     recent_blockhashes: Option<Arc<RecentBlockhashes>>,
     stake_history: Option<Arc<StakeHistory>>,
@@ -110,6 +112,16 @@ impl SysvarCache {
         self.slot_hashes = Some(Arc::new(slot_hashes));
     }
 
+    pub fn get_t_slot_hashes(&self) -> Result<Arc<TSlotHashes>, InstructionError> {
+        self.t_slot_hashes
+            .clone()
+            .ok_or(InstructionError::UnsupportedSysvar)
+    }
+
+    pub fn set_t_slot_hashes(&mut self, slot_hashes: TSlotHashes) {
+        self.t_slot_hashes = Some(Arc::new(slot_hashes));
+    }
+
     #[deprecated]
     #[allow(deprecated)]
     pub fn get_recent_blockhashes(&self) -> Result<Arc<RecentBlockhashes>, InstructionError> {
@@ -183,6 +195,14 @@ impl SysvarCache {
                 }
             });
         }
+
+        if self.t_slot_hashes.is_none() {
+            get_account_data(&TSlotHashes::id(), &mut |data: &[u8]| {
+                if let Ok(slot_hashes) = bincode::deserialize(data) {
+                    self.set_t_slot_hashes(slot_hashes);
+                }
+            });
+        }
         #[allow(deprecated)]
         if self.recent_blockhashes.is_none() {
             get_account_data(&RecentBlockhashes::id(), &mut |data: &[u8]| {
@@ -218,6 +238,7 @@ impl SysvarCache {
 /// as `solana_sdk::keyed_account::from_keyed_account` despite dynamically
 /// loading them instead of deserializing from account data.
 pub mod get_sysvar_with_account_check {
+    use solana_sdk::slot_hashes::TSlotHashes;
     use super::*;
 
     fn check_sysvar_account<S: Sysvar>(
@@ -270,6 +291,19 @@ pub mod get_sysvar_with_account_check {
             instruction_account_index,
         )?;
         invoke_context.get_sysvar_cache().get_slot_hashes()
+    }
+
+    pub fn t_slot_hashes(
+        invoke_context: &InvokeContext,
+        instruction_context: &InstructionContext,
+        instruction_account_index: IndexOfAccount,
+    ) -> Result<Arc<TSlotHashes>, InstructionError> {
+        check_sysvar_account::<TSlotHashes>(
+            invoke_context.transaction_context,
+            instruction_context,
+            instruction_account_index,
+        )?;
+        invoke_context.get_sysvar_cache().get_t_slot_hashes()
     }
 
     #[allow(deprecated)]
