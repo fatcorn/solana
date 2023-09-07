@@ -370,6 +370,11 @@ impl StandardBroadcastRun {
         }
         to_shreds_time.stop();
 
+        if t_data_shreds.is_some() && !t_data_shreds.clone().unwrap().is_empty() && !bank.is_include_t_slot() {
+            // todo,check, t_parent will be none?
+            bank.update_t_slot_related(bank.t_slot(), bank.t_parent_slot(), bank.t_parent().unwrap());
+        }
+
         let mut get_leader_schedule_time = Measure::start("broadcast_get_leader_schedule");
         // Broadcast the last shred of the interrupted slot if necessary
         if !prev_slot_shreds.is_empty() {

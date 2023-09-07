@@ -522,9 +522,11 @@ impl Tower {
         slot: Slot,
         hash: Hash,
         last_voted_slot_in_bank: Option<Slot>,
+        t_vote_slot: Option<Slot>,
+        t_vote_hash: Option<Hash>,
     ) -> VoteTransaction {
         // TODO, input valid args, add by jesse
-        let vote = Vote::new(vec![slot], hash, vec![], None);
+        let vote = Vote::new(vec![slot], hash, vec![t_vote_slot], t_vote_hash);
         process_vote_unchecked(local_vote_state, vote);
         let slots = if let Some(last_voted_slot) = last_voted_slot_in_bank {
             local_vote_state
@@ -546,9 +548,14 @@ impl Tower {
         vote_state.as_ref().ok()?.last_voted_slot()
     }
 
-    pub fn record_bank_vote(&mut self, bank: &Bank, vote_account_pubkey: &Pubkey) -> Option<Slot> {
+    pub fn record_bank_vote(&mut self, bank: &Bank, vote_account_pubkey: &Pubkey) -> (Option<Slot>, Option<Slot>) {
         let last_voted_slot_in_bank = Self::last_voted_slot_in_bank(bank, vote_account_pubkey);
 
+        let (t_slot, t_hash) = if bank.is_include_t_slot() {
+            (Some(bank.t_slot()), Some(bank.hash()))
+        } else {
+            (None, None)
+        };
         // Returns the new root if one is made after applying a vote for the given bank to
         // `self.vote_state`
         self.record_bank_vote_and_update_lockouts(
@@ -556,6 +563,8 @@ impl Tower {
             bank.hash(),
             last_voted_slot_in_bank,
             Self::is_direct_vote_state_update_enabled(bank),
+            t_slot,
+            t_hash
         )
     }
 
@@ -565,13 +574,17 @@ impl Tower {
         vote_hash: Hash,
         last_voted_slot_in_bank: Option<Slot>,
         is_direct_vote_state_update_enabled: bool,
-    ) -> Option<Slot> {
+        t_vote_slot: Option<Slot>,
+        t_vote_hash: Option<Hash>,
+    ) -> (Option<Slot>, Option<Slot>) {
         trace!("{} record_vote for {}", self.node_pubkey, vote_slot);
         let old_root = self.root();
 
+        let t_old_root = self.root();
+
         let mut new_vote = if is_direct_vote_state_update_enabled {
             // TODO, input valid args, add by jesse
-            let vote = Vote::new(vec![vote_slot], vote_hash, vec![], None);
+            let vote = Vote::new(vec![vote_slot], vote_hash, vec![t_vote_slot], t_vote_hash);
             process_vote_unchecked(&mut self.vote_state, vote);
             VoteTransaction::from(VoteStateUpdate::new(
                 self.vote_state
@@ -588,6 +601,8 @@ impl Tower {
                 vote_slot,
                 vote_hash,
                 last_voted_slot_in_bank,
+                t_vote_slot,
+                t_vote_hash,
             )
         };
 
@@ -596,16 +611,25 @@ impl Tower {
 
         let new_root = self.root();
 
+        let t_new_root = self.root();
+
         datapoint_info!(
             "tower-vote",
             ("latest", vote_slot, i64),
             ("root", new_root, i64)
         );
-        if old_root != new_root {
+        let new_root = if old_root != new_root {
             Some(new_root)
         } else {
             None
-        }
+        };
+        let t_new_root = if t_old_root != t_new_root {
+            Some(t_new_root)
+        } else {
+            None
+        };
+
+        (new_root, t_new_root)
     }
 
     #[cfg(test)]
@@ -675,6 +699,10 @@ impl Tower {
         self.vote_state.root_slot.unwrap()
     }
 
+    pub fn t_root(&self) -> Slot {
+        self.vote_state.t_root_slot.unwrap()
+    }
+
     // a slot is recent if it's newer than the last vote we have. If we haven't voted yet
     // but have a root (hard forks situation) then compare it to the root
     pub fn is_recent(&self, slot: Slot) -> bool {
@@ -709,7 +737,7 @@ impl Tower {
         // remaining voted slots are on a different fork from the checked slot,
         // it's still locked out.
         let mut vote_state = self.vote_state.clone();
-        // todo,check input valid args, add by jesse
+        // todo,check input valid args, may should input t_ancestors add by jesse
         process_slot_vote_unchecked(&mut vote_state, slot, None);
         for vote in &vote_state.votes {
             if slot != vote.slot() && !ancestors.contains(&vote.slot()) {
@@ -1092,10 +1120,11 @@ impl Tower {
         slot: Slot,
         voted_stakes: &VotedStakes,
         total_stake: Stake,
+        t_slot: Option<Slot>,
     ) -> ThresholdDecision {
         let mut vote_state = self.vote_state.clone();
         // todo,check input valid args, add by jesse
-        process_slot_vote_unchecked(&mut vote_state, slot,None);
+        process_slot_vote_unchecked(&mut vote_state, slot, t_slot);
         let lockout = vote_state.nth_recent_lockout(self.threshold_depth);
         if let Some(lockout) = lockout {
             if let Some(fork_stake) = voted_stakes.get(&lockout.slot()) {

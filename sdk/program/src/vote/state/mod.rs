@@ -46,8 +46,8 @@ pub const VOTE_CREDITS_MAXIMUM_PER_SLOT: u8 = 8;
 pub struct Vote {
     /// A stack of votes starting with the oldest vote with votes(virtual) slot
     pub slots: Vec<Slot>,
-    /// A stack of votes starting with the oldest vote with transaction(real) slot
-    pub t_slots: Vec<Slot>,
+    /// A stack of votes starting with the oldest vote with transaction(truly) slot, it's len should eq slots len
+    pub t_slots: Vec<Option<Slot>>,
     /// signature of the bank's state at the last slot
     pub hash: Hash,
     /// signature of the truly bank's state at the last slot
@@ -57,7 +57,7 @@ pub struct Vote {
 }
 
 impl Vote {
-    pub fn new(slots: Vec<Slot>, hash: Hash, t_slots: Vec<Slot>, t_hash: Option<Hash>) -> Self {
+    pub fn new(slots: Vec<Slot>, hash: Hash, t_slots: Vec<Option<Slot>>, t_hash: Option<Hash>) -> Self {
         Self {
             slots,
             t_slots,

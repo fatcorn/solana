@@ -1374,7 +1374,7 @@ impl Bank {
                 slot,
                 bank_id_generator: Arc::clone(&parent.rc.bank_id_generator),
                 t_parent: RwLock::new(None),
-                // todo, wait for input, add by jesse
+                // todo, wait for input, may can remove, depending on parent and slot what to use, add by jesse
                 t_slot: RwLock::new(u64::MAX),
             }
         });
@@ -1409,6 +1409,11 @@ impl Bank {
         let (feature_set, feature_set_time_us) = measure_us!(parent.feature_set.clone());
 
         let accounts_data_size_initial = parent.load_accounts_data_size();
+        let t_slot = if parent.is_include_t_slot() {
+            parent.t_slot() + 1
+        } else {
+            parent.t_slot()
+        };
         let mut new = Self {
             incremental_snapshot_persistence: None,
             rc,
@@ -1423,7 +1428,7 @@ impl Bank {
             t_parent_hash: RwLock::new(parent.t_hash()),
             t_hash: RwLock::new(Hash::default()),
             // todo, wait for func input, add by jesse
-            t_slot: RwLock::new(u64::MAX),
+            t_slot: RwLock::new(t_slot),
             t_block_height: RwLock::new(parent.t_block_height()),
             t_ancestors: Ancestors::default(),
             is_t_slot_exist: RwLock::new(false),
@@ -2077,6 +2082,7 @@ impl Bank {
     pub fn t_slot(&self) -> Slot {
         *self.t_slot.read().unwrap()
     }
+
 
     pub fn bank_id(&self) -> BankId {
         self.bank_id

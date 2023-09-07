@@ -813,18 +813,18 @@ pub fn process_vote(
     }
     let earliest_slot_in_history = slot_hashes.last().map(|(slot, _hash)| *slot).unwrap_or(0);
 
-    let mut t_slots = vec![] ;
-    for t_slot in &vote.t_slots {
-        t_slots.push(Some(*t_slot));
-    }
-    if vote.t_slots.is_empty() {
-        for i in 0..vote.slots.len() {
-            // todo, check, now, t_slots may not continuous, may like [1, None, 3], so may change to t_slots: Vec<Option<Slot>> later,
-            // todo, and then, not need deal in here add by jesse
-            t_slots.push(None);
-        }
-    }
-    if t_slots.len() != vote.slots.len() {
+    // let mut t_slots = vec![] ;
+    // for t_slot in &vote.t_slots {
+    //     t_slots.push(Some(*t_slot));
+    // }
+    // if vote.t_slots.is_empty() {
+    //     for i in 0..vote.slots.len() {
+    //         // todo, check, now, t_slots may not continuous, may like [1, None, 3], so may change to t_slots: Vec<Option<Slot>> later,
+    //         // todo, and then, not need deal in here add by jesse
+    //         t_slots.push(None);
+    //     }
+    // }
+    if vote.t_slots.len() != vote.slots.len() {
         // todo, add new err, add by jesse
         return Err(VoteError::EmptySlots);
     }
@@ -832,7 +832,7 @@ pub fn process_vote(
     let vote_slots  = vote
         .slots
         .iter()
-        .zip(t_slots.iter())
+        .zip(vote.t_slots.iter())
         .filter(|(slot, t_slot)| **slot >= earliest_slot_in_history)
         .map(|x| (x.0.clone(), x.1.clone()))
         .collect::<Vec<_>>();
@@ -855,23 +855,23 @@ pub fn process_vote_unchecked(vote_state: &mut VoteState, vote: Vote) {
     if vote.slots.is_empty() {
         return;
     }
-    let mut t_slots = vote.t_slots.iter().map(|s| Some(*s)).collect::<Vec<Option<Slot>>>();
-    if vote.t_slots.is_empty() {
-        for _ in 0..vote.slots.len() {
-            t_slots.push(None);
-        }
-    }
+    // let mut t_slots = vote.t_slots.iter().map(|s| Some(*s)).collect::<Vec<Option<Slot>>>();
+    // if vote.t_slots.is_empty() {
+    //     for _ in 0..vote.slots.len() {
+    //         t_slots.push(None);
+    //     }
+    // }
     let vote_slots = vote
         .slots
         .iter()
-        .zip(t_slots.iter())
+        .zip(vote.t_slots.iter())
         .map(|x| (x.0.clone(), x.1.clone()))
         .collect::<Vec<(Slot, Option<Slot>)>>();
 
 
     let slot_hashes: Vec<_> = vote.slots.iter().rev().map(|x| (*x, vote.hash)).collect();
     // todo, check, use t_slots get t_slot_hashes is ok? add by jesse
-    let t_slot_hashes: Vec<_> = vote.t_slots.iter().rev().map(|x| (*x, vote.t_hash.unwrap())).collect();
+    let t_slot_hashes: Vec<_> = vote.t_slots.iter().rev().filter(|x| x.is_some()).map(|x| (x.unwrap(), vote.t_hash.unwrap()) ).collect();
     let _ignored = process_vote_unfiltered(
         vote_state,
         &vote_slots,
@@ -891,13 +891,9 @@ pub fn process_slot_votes_unchecked(vote_state: &mut VoteState, slots: &[Slot]) 
 }
 
 pub fn process_slot_vote_unchecked(vote_state: &mut VoteState, slot: Slot, t_slot: Option<Slot>) {
-    let t_slots = if t_slot.is_some() {
-        vec![t_slot.unwrap()]
-    } else {
-        vec![]
-    };
+    let t_hash = if t_slot.is_some() { Some(Hash::default()) } else { None };
     // TODO, check, input valid args, add by jesse
-    process_vote_unchecked(vote_state, Vote::new(vec![slot], Hash::default(), t_slots, None));
+    process_vote_unchecked(vote_state, Vote::new(vec![slot], Hash::default(), vec![t_slot], t_hash));
 }
 
 /// Authorize the given pubkey to withdraw or sign votes. This may be called multiple times,

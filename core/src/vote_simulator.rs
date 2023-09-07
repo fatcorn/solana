@@ -197,7 +197,7 @@ impl VoteSimulator {
             return heaviest_fork_failures;
         }
 
-        let new_root = tower.record_bank_vote(&vote_bank, &my_vote_pubkey);
+        let (new_root, t_new_root) = tower.record_bank_vote(&vote_bank, &my_vote_pubkey);
         if let Some(new_root) = new_root {
             self.set_root(new_root);
         }

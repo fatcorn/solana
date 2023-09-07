@@ -2130,8 +2130,9 @@ impl ReplayStage {
             datapoint_info!("replay_stage-voted_empty_bank", ("slot", bank.slot(), i64));
         }
         trace!("handle votable bank {}", bank.slot());
-        let new_root = tower.record_bank_vote(bank, vote_account_pubkey);
+        let (new_root, t_new_root) = tower.record_bank_vote(bank, vote_account_pubkey);
 
+        // todo handle truly new root, add by jesse
         if let Some(new_root) = new_root {
             // get the root bank before squash
             let root_bank = bank_forks
@@ -3185,7 +3186,7 @@ impl ReplayStage {
                 .expect("All frozen banks must exist in the Progress map");
 
             stats.vote_threshold =
-                tower.check_vote_stake_threshold(bank_slot, &stats.voted_stakes, stats.total_stake);
+                tower.check_vote_stake_threshold(bank_slot, &stats.voted_stakes, stats.total_stake, bank_t_slot);
             stats.is_locked_out = tower.is_locked_out(
                 bank_slot,
                 ancestors
