@@ -47,6 +47,7 @@ pub struct ProcessTransactionBatchOutput {
     pub execute_and_commit_transactions_output: ExecuteAndCommitTransactionsOutput,
 }
 
+#[derive(Debug)]
 pub struct ExecuteAndCommitTransactionsOutput {
     // Total number of transactions that were passed as candidates for execution
     transactions_attempted_execution_count: usize,
@@ -99,7 +100,7 @@ impl Consumer {
         let mut consumed_buffered_packets_count = 0;
         let mut proc_start = Measure::start("consume_buffered_process");
         let num_packets_to_process = unprocessed_transaction_storage.len();
-
+        warn!("unprocessed_transaction_storage got {} txs", num_packets_to_process);
         let is_vote = match unprocessed_transaction_storage {
             UnprocessedTransactionStorage::VoteStorage(_) => {
                 true
@@ -164,10 +165,12 @@ impl Consumer {
         is_vote: bool
     ) -> Option<Vec<usize>> {
         if payload.reached_end_of_slot {
+            warn!("payload reached_end_of_slot");
             return None;
         }
 
         let packets_to_process_len = packets_to_process.len();
+        warn!("packets_to_process {}", packets_to_process_len);
         let (process_transactions_summary, process_packets_transactions_us) = measure_us!(self
             .process_packets_transactions(
                 &bank_start.working_bank,
@@ -464,7 +467,7 @@ impl Consumer {
             txs,
             pre_results
         ));
-
+        warn!("banking stage got {} txs to execute, is vote tx {}", txs.len(), is_vote);
         // Only lock accounts for those transactions are selected for the block;
         // Once accounts are locked, other threads cannot encode transactions that will modify the
         // same account state
@@ -481,7 +484,7 @@ impl Consumer {
         // and WouldExceedMaxAccountDataCostLimit
         let mut execute_and_commit_transactions_output =
             self.execute_and_commit_transactions_locked(bank, &batch, is_vote);
-
+        warn!("banking stage execute txs result {:?}", execute_and_commit_transactions_output);
         // Once the accounts are new transactions can enter the pipeline to process them
         let (_, unlock_us) = measure_us!(drop(batch));
 

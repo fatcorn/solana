@@ -164,6 +164,8 @@ impl VoteInstruction {
     pub fn is_single_vote_state_update(&self) -> bool {
         matches!(
             self,
+            // todo check, add Vote, in continues solana version, is CompactUpdateVoteState, add by jesse
+            Self::Vote(_) |
             Self::UpdateVoteState(_)
                 | Self::UpdateVoteStateSwitch(_, _)
                 | Self::CompactUpdateVoteState(_)
@@ -419,6 +421,7 @@ pub fn vote(vote_pubkey: &Pubkey, authorized_voter_pubkey: &Pubkey, vote: Vote) 
         AccountMeta::new_readonly(sysvar::slot_hashes::id(), false),
         AccountMeta::new_readonly(sysvar::clock::id(), false),
         AccountMeta::new_readonly(*authorized_voter_pubkey, true),
+        AccountMeta::new_readonly(sysvar::t_slot_hashes::id(), false),
     ];
 
     Instruction::new_with_bincode(id(), &VoteInstruction::Vote(vote), account_metas)
@@ -435,6 +438,7 @@ pub fn vote_switch(
         AccountMeta::new_readonly(sysvar::slot_hashes::id(), false),
         AccountMeta::new_readonly(sysvar::clock::id(), false),
         AccountMeta::new_readonly(*authorized_voter_pubkey, true),
+        AccountMeta::new_readonly(sysvar::t_slot_hashes::id(), false),
     ];
 
     Instruction::new_with_bincode(

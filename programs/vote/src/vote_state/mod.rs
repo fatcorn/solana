@@ -28,6 +28,8 @@ use {
         fmt::Debug,
     },
 };
+use solana_program::msg;
+use solana_program_runtime::sysvar_cache::get_sysvar_with_account_check::t_slot_hashes;
 
 #[frozen_abi(digest = "2AuJFjx7SYrJ2ugCfH1jFh3Lr9UHMEPfKwwk1NcjqND1")]
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, AbiEnumVisitor, AbiExample)]
@@ -445,6 +447,7 @@ fn check_slots_are_valid(
     //
     // 2) Conversely, `slot_hashes` is sorted from newest/largest vote to
     // the oldest/smallest vote
+    warn!("vote_state {:?}", vote_state);
     while i < vote_slots.len() && j > 0 {
         // 1) increment `i` to find the smallest slot `s` in `vote_slots`
         // where `s` >= `last_voted_slot`
@@ -478,8 +481,9 @@ fn check_slots_are_valid(
 
         if vote_slots[i].1.is_some() && vote_slots[i].1.unwrap() != t_slot_hashes[t.checked_sub(1).expect("`t` is positive")].0 {
             t = t
-                .checked_sub(t)
+                .checked_sub(1)
                 .expect("`t` is positive when finding newer slots");
+            continue;
         }
 
 
@@ -492,17 +496,20 @@ fn check_slots_are_valid(
             .checked_sub(1)
             .expect("`j` is positive when hash is found");
 
-        t = t
-            .checked_sub(1)
-            .expect("`t` is positive when hash is found");
+        // todo check ,the t value len may is 0, check judge the t_vote_hash is ok?, add by jesse
+        if t_vote_hash.is_some() {
+            t = t
+                .checked_sub(1)
+                .expect("`t` is positive when hash is found");
+        }
     }
 
     if j == slot_hashes.len() {
         // This means we never made it to steps 2) or 3) above, otherwise
         // `j` would have been decremented at least once. This means
         // there are not slots in `vote_slots` greater than `last_voted_slot`
-        debug!(
-            "{} dropped vote slots {:?}, vote hash: {:?} slot hashes:SlotHash {:?}, too old ",
+        warn!(
+            "j mismatched, {} dropped vote slots {:?}, vote hash: {:?} slot hashes:SlotHash {:?}, too old ",
             vote_state.node_pubkey, vote_slots, vote_hash, slot_hashes
         );
         return Err(VoteError::VoteTooOld);
@@ -512,8 +519,8 @@ fn check_slots_are_valid(
         // This means we never made it to steps 2) or 3) above, otherwise
         // `t` would have been decremented at least once. This means
         // there are not slots in `vote_slots` greater than `last_voted_slot`
-        debug!(
-            "{} dropped vote t_slots {:?}, vote t_hash: {:?} slot hashes:SlotHash {:?}, too old ",
+        warn!(
+            "t mismatched, {} dropped vote t_slots {:?}, vote t_hash: {:?} slot hashes:SlotHash {:?}, too old ",
             vote_state.node_pubkey, vote_slots, t_vote_hash, t_slot_hashes
         );
         return Err(VoteError::VoteTooOld);
@@ -872,7 +879,10 @@ pub fn process_vote_unchecked(vote_state: &mut VoteState, vote: Vote) {
     let slot_hashes: Vec<_> = vote.slots.iter().rev().map(|x| (*x, vote.hash)).collect();
     // todo, check, use t_slots get t_slot_hashes is ok? add by jesse
     let t_slot_hashes: Vec<_> = vote.t_slots.iter().rev().filter(|x| x.is_some()).map(|x| (x.unwrap(), vote.t_hash.unwrap()) ).collect();
-    let _ignored = process_vote_unfiltered(
+    info!("t_slot hashes: {:?}", t_slot_hashes);
+    info!("t_hash : {:?}", vote);
+    info!("slot_hashes : {:?}", slot_hashes);
+    let ignored = process_vote_unfiltered(
         vote_state,
         &vote_slots,
         &vote,
@@ -881,6 +891,10 @@ pub fn process_vote_unchecked(vote_state: &mut VoteState, vote: Vote) {
         0,
         &t_slot_hashes,
     );
+    if !ignored.is_ok() {
+        warn!("process vote failed {:?}", ignored.err());
+    }
+
 }
 
 #[cfg(test)]

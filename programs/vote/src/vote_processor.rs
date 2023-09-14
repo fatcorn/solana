@@ -17,6 +17,7 @@ use {
     },
     std::collections::HashSet,
 };
+use solana_program::msg;
 
 fn process_authorize_with_seed_instruction(
     invoke_context: &InvokeContext,
@@ -175,6 +176,7 @@ declare_process_instruction!(
                     instruction_context,
                     4,
                 )?;
+
                 vote_state::process_vote_with_account(
                     &mut me,
                     &slot_hashes,

@@ -1144,6 +1144,7 @@ impl ClusterInfo {
             .map(Ok)
             .unwrap_or_else(|| self.my_contact_info().tpu(contact_info::Protocol::UDP))?;
         let buf = serialize(transaction)?;
+        warn!("voting service send vote tx to {}", tpu);
         self.socket.send_to(&buf, tpu)?;
         Ok(())
     }

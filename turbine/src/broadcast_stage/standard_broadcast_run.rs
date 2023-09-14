@@ -155,7 +155,7 @@ impl StandardBroadcastRun {
     > {
         let mut entries_iterator = entries.iter();
         let virtual_entries : Vec<_> = entries_iterator.clone().filter(|x| x.is_vote ).cloned().collect();
-        let truly_entries : Vec<_> = entries_iterator.cloned().collect();
+        let truly_entries : Vec<_> = entries_iterator.clone().filter(|x| !x.is_vote ).cloned().collect();;
 
         let (slot, parent_slot) = self.current_slot_and_parent.unwrap();
         let (next_shred_index, next_code_index, t_next_shred_index, t_next_code_index) = match &self.unfinished_slot {
@@ -371,6 +371,8 @@ impl StandardBroadcastRun {
         to_shreds_time.stop();
 
         if t_data_shreds.is_some() && !t_data_shreds.clone().unwrap().is_empty() && !bank.is_include_t_slot() {
+            // todo delete info!
+            info!("got t_data_shreds {}", t_data_shreds.clone().unwrap().len());
             // todo,check, t_parent will be none?
             bank.update_t_slot_related(bank.t_slot(), bank.t_parent_slot(), bank.t_parent().unwrap());
         }

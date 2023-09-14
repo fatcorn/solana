@@ -2,6 +2,7 @@
 //! to construct a software pipeline. The stage uses all available CPU cores and
 //! can do its processing in parallel with signature verification on the GPU.
 
+use trees::tr;
 use {
     self::{
         committer::Committer,
@@ -366,7 +367,9 @@ impl BankingStage {
                 bank.feature_set
                     .is_active(&allow_votes_to_directly_update_vote_state::id())
             })
-            .unwrap_or(false);
+            // todo, check use split vote, add by jesse
+            .unwrap_or(false) | true;
+        warn!("should_split_voting_threads {}", should_split_voting_threads);
         // Many banks that process transactions in parallel.
         let bank_thread_hdls: Vec<JoinHandle<()>> = (0..num_threads)
             .map(|id| {

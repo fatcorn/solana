@@ -19,6 +19,7 @@ use {
         sync::{Arc, RwLock},
     },
 };
+use solana_sdk::instruction::InstructionError;
 
 #[derive(PartialEq, Eq, Debug, Copy, Clone)]
 pub enum VoteSource {
@@ -52,12 +53,14 @@ impl LatestValidatorVotePacket {
         vote_source: VoteSource,
     ) -> Result<Self, DeserializedPacketError> {
         let message = vote.transaction().get_message();
+        warn!("--------- der ready to start");
         let (_, instruction) = message
             .program_instructions_iter()
             .next()
             .ok_or(DeserializedPacketError::VoteTransactionError)?;
-
-        match limited_deserialize::<VoteInstruction>(&instruction.data) {
+        let ret = limited_deserialize::<VoteInstruction>(&instruction.data);
+        warn!("--------- der ret {:?}", ret);
+        match ret {
             Ok(vote_state_update_instruction)
                 if vote_state_update_instruction.is_single_vote_state_update() =>
             {
@@ -68,8 +71,8 @@ impl LatestValidatorVotePacket {
                     .ok_or(DeserializedPacketError::VoteTransactionError)?;
                 let slot = vote_state_update_instruction.last_voted_slot().unwrap_or(0);
                 let timestamp = vote_state_update_instruction.timestamp();
-
-                Ok(Self {
+                warn!("--------- der vote ins ok");
+                return Ok(Self {
                     vote: Some(vote),
                     slot,
                     pubkey,
@@ -78,7 +81,15 @@ impl LatestValidatorVotePacket {
                     timestamp,
                 })
             }
-            _ => Err(DeserializedPacketError::VoteTransactionError),
+            Err(e) => {
+                warn!("--------- der vote ins err {}", e);
+                return Err(DeserializedPacketError::VoteTransactionError)
+            }
+
+            _ => {
+                warn!("--------- der vote ins err in third match");
+                return Err(DeserializedPacketError::VoteTransactionError)
+            }
         }
     }
 

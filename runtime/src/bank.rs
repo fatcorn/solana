@@ -1135,7 +1135,8 @@ impl Bank {
             t_parent_hash: RwLock::<Hash>::default(),
             t_parent_slot: RwLock::<Slot>::default(),
             t_ancestors: Ancestors::default(),
-            is_t_slot_exist: RwLock::<bool>::default(),
+            // todo, check, genesis is a t slot too, add by jesse.
+            is_t_slot_exist: RwLock::new(true),
         };
 
         let accounts_data_size_initial = bank.get_total_accounts_stats().unwrap().data_len as u64;
@@ -1373,7 +1374,8 @@ impl Bank {
                 parent: RwLock::new(Some(Arc::clone(parent))),
                 slot,
                 bank_id_generator: Arc::clone(&parent.rc.bank_id_generator),
-                t_parent: RwLock::new(None),
+                // todo, check, just set t_parent is ok? add by jesse
+                t_parent: RwLock::new(Some(Arc::clone(parent))),
                 // todo, wait for input, may can remove, depending on parent and slot what to use, add by jesse
                 t_slot: RwLock::new(u64::MAX),
             }
@@ -8384,6 +8386,7 @@ impl Bank {
         // todo, this two args may not use in rc, if so, remove this 2 args later, add by jesse
         *self.rc.t_slot.write().unwrap() = t_slot;
         *self.rc.t_parent.write().unwrap() = Some(t_parent.clone());
+        info!("update_t_slot_related, the block{} is a truly block", self.slot);
         *self.is_t_slot_exist.write().unwrap() = true;
     }
 }

@@ -157,6 +157,14 @@ struct SerializableVersionedBank<'a> {
     unused_accounts: UnusedAccounts,
     epoch_stakes: &'a HashMap<Epoch, EpochStakes>,
     is_delta: bool,
+    // The truly slot info
+    t_parent_hash: Hash,
+    t_parent_slot: Slot,
+    t_hash: Hash,
+    t_slot: Slot,
+    t_block_height: u64,
+    t_ancestors: &'a AncestorsForSerialization,
+    is_t_slot_exist: bool,
 }
 
 impl<'a> From<crate::bank::BankFieldsToSerialize<'a>> for SerializableVersionedBank<'a> {
@@ -194,6 +202,14 @@ impl<'a> From<crate::bank::BankFieldsToSerialize<'a>> for SerializableVersionedB
             unused_accounts: UnusedAccounts::default(),
             epoch_stakes: rhs.epoch_stakes,
             is_delta: rhs.is_delta,
+
+            t_parent_hash: rhs.t_parent_hash,
+            t_parent_slot: rhs.t_parent_slot,
+            t_hash: rhs.t_hash,
+            t_slot: rhs.t_slot,
+            t_block_height: rhs.t_block_height,
+            t_ancestors: rhs.t_ancestors,
+            is_t_slot_exist: rhs.is_t_slot_exist,
         }
     }
 }
@@ -433,6 +449,14 @@ impl<'a> TypeContext<'a> for Context {
             unused_accounts: UnusedAccounts::default(),
             epoch_stakes: &rhs.epoch_stakes,
             is_delta: rhs.is_delta,
+
+            t_parent_hash: rhs.t_parent_hash,
+            t_parent_slot: rhs.t_parent_slot,
+            t_hash: rhs.t_hash,
+            t_slot: rhs.t_slot,
+            t_block_height: rhs.t_block_height,
+            t_ancestors: &rhs.t_ancestors,
+            is_t_slot_exist: rhs.is_t_slot_exist,
         };
 
         match get_serialize_bank_fields(

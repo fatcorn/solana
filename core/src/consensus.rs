@@ -264,12 +264,13 @@ impl Tower {
         vote_account_pubkey: &Pubkey,
         root: Slot,
         bank: &Bank,
+        t_root: Slot,
     ) -> Self {
         let mut tower = Tower {
             node_pubkey: *node_pubkey,
             ..Tower::default()
         };
-        tower.initialize_lockouts_from_bank(vote_account_pubkey, root, bank);
+        tower.initialize_lockouts_from_bank(vote_account_pubkey, root, bank, t_root);
         tower
     }
 
@@ -296,6 +297,7 @@ impl Tower {
                 vote_account,
             );
         let root = root_bank.slot();
+        let t_root = root_bank.t_slot();
 
         let (best_slot, best_hash) = heaviest_subtree_fork_choice.best_overall_slot();
         let heaviest_bank = bank_forks
@@ -304,7 +306,7 @@ impl Tower {
                 "The best overall slot must be one of `frozen_banks` which all exist in bank_forks",
             );
 
-        Self::new(node_pubkey, vote_account, root, &heaviest_bank)
+        Self::new(node_pubkey, vote_account, root, &heaviest_bank, t_root)
     }
 
     pub(crate) fn collect_vote_lockouts(
@@ -344,6 +346,8 @@ impl Tower {
                 }
                 Ok(vote_state) => vote_state,
             };
+            // todo delete, add by jesse
+            warn!("----------bank account vote state in collect_vote_lockouts{:?}", vote_state);
             for vote in &vote_state.votes {
                 lockout_intervals
                     .entry(vote.lockout.last_locked_out_slot())
@@ -539,7 +543,7 @@ impl Tower {
             local_vote_state.votes.iter().map(|v| v.slot()).collect()
         };
         // TODO, input valid args, add by jesse
-        VoteTransaction::from(Vote::new(slots, hash, vec![], None))
+        VoteTransaction::from(Vote::new(slots, hash, vec![t_vote_slot], t_vote_hash))
     }
 
     pub fn last_voted_slot_in_bank(bank: &Bank, vote_account_pubkey: &Pubkey) -> Option<Slot> {
@@ -552,7 +556,7 @@ impl Tower {
         let last_voted_slot_in_bank = Self::last_voted_slot_in_bank(bank, vote_account_pubkey);
 
         let (t_slot, t_hash) = if bank.is_include_t_slot() {
-            (Some(bank.t_slot()), Some(bank.hash()))
+            (Some(bank.t_slot()), Some(bank.t_hash()))
         } else {
             (None, None)
         };
@@ -583,6 +587,7 @@ impl Tower {
         let t_old_root = self.root();
 
         let mut new_vote = if is_direct_vote_state_update_enabled {
+            warn!("new_vote in is_direct_vote_state_update_enabled");
             // TODO, input valid args, add by jesse
             let vote = Vote::new(vec![vote_slot], vote_hash, vec![t_vote_slot], t_vote_hash);
             process_vote_unchecked(&mut self.vote_state, vote);
@@ -596,6 +601,7 @@ impl Tower {
                 vote_hash,
             ))
         } else {
+            warn!("-----new_vote not in is_direct_vote_state_update_enabled");
             Self::apply_vote_and_generate_vote_diff(
                 &mut self.vote_state,
                 vote_slot,
@@ -1401,6 +1407,7 @@ impl Tower {
         vote_account_pubkey: &Pubkey,
         root: Slot,
         bank: &Bank,
+        t_root: Slot,
     ) {
         if let Some(vote_account) = bank.get_vote_account(vote_account_pubkey) {
             self.vote_state = vote_account
@@ -1408,6 +1415,8 @@ impl Tower {
                 .cloned()
                 .expect("vote_account isn't a VoteState?");
             self.initialize_root(root);
+            // todo,added t_root to tower, check later, add by jesse
+            self.initialize_t_root(t_root);
             self.initialize_lockouts(|v| v.slot() > root);
             trace!(
                 "Lockouts in tower for {} is initialized using bank {}",
@@ -1416,6 +1425,7 @@ impl Tower {
             );
         } else {
             self.initialize_root(root);
+            self.initialize_t_root(t_root);
             info!(
                 "vote account({}) not found in bank (slot={})",
                 vote_account_pubkey,
@@ -1432,6 +1442,10 @@ impl Tower {
     // boot
     fn initialize_root(&mut self, root: Slot) {
         self.vote_state.root_slot = Some(root);
+    }
+
+    fn initialize_t_root(&mut self, t_root: Slot) {
+        self.vote_state.t_root_slot = Some(t_root);
     }
 
     pub fn save(&self, tower_storage: &dyn TowerStorage, node_keypair: &Keypair) -> Result<()> {

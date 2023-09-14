@@ -504,6 +504,7 @@ impl ReplayStage {
         banking_tracer: Arc<BankingTracer>,
         popular_pruned_forks_receiver: PopularPrunedForksReceiver,
     ) -> Result<Self, String> {
+        //todo set tower genesis t_slot, add by jesse
         let mut tower = if let Some(process_blockstore) = maybe_process_blockstore {
             let tower = process_blockstore.process_to_create_tower()?;
             info!("Tower state: {:?}", tower);
@@ -766,6 +767,8 @@ impl ReplayStage {
                 compute_bank_stats_time.stop();
 
                 let mut compute_slot_stats_time = Measure::start("compute_slot_stats_time");
+                // todo delete, add by jesse
+                warn!("------newly_computed_slot_stats {:?}", newly_computed_slot_stats);
                 for slot in newly_computed_slot_stats {
                     let fork_stats = progress.get_fork_stats(slot).unwrap();
                     let confirmed_forks = Self::confirm_forks(
@@ -3809,7 +3812,7 @@ impl ReplayStage {
         generate_new_bank_forks_read_lock.stop();
 
         let frozen_banks = forks.frozen_banks();
-        let t_frozen_banks = forks.frozen_banks();
+        let t_frozen_banks = forks.t_frozen_banks();
         let frozen_bank_slots: Vec<u64> = frozen_banks
             .keys()
             .cloned()
