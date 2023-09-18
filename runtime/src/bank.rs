@@ -7398,8 +7398,13 @@ impl Bank {
     #[must_use]
     fn verify_hash(&self) -> bool {
         assert!(self.is_frozen());
-        // todo, add valid args later, add by jesse
-        let calculated_hash = self.hash_internal_state(false);
+        // todo,solved, check later, add valid args later, add by jesse
+        let calculated_hash = if self.is_include_t_slot()
+        {
+            self.hash_internal_state(false)
+        } else {
+            self.hash_internal_state(true)
+        };
         let expected_hash = self.hash();
 
         if calculated_hash == expected_hash {

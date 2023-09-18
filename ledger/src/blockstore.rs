@@ -3030,7 +3030,7 @@ impl Blockstore {
     /// Returns the entry vector for the slot starting with `shred_start_index`
     pub fn get_slot_entries(&self, slot: Slot, shred_start_index: u64) -> Result<Vec<Entry>> {
         // todo, input valid is_virtual in later, add by jesse
-        self.get_slot_entries_with_shred_info(slot, shred_start_index, false, false)
+        self.get_slot_entries_with_shred_info(slot, shred_start_index, false, true)
             .map(|x| x.0)
     }
 
