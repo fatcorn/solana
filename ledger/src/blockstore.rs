@@ -501,6 +501,17 @@ impl Blockstore {
         self.meta_cf.get(slot)
     }
 
+    /// Returns the SlotMeta of the specified slot in v_slot cf or t_slot cf
+    //todo, may can replace with meta func, add by jesse
+    pub fn indeed_meta(&self, slot: Slot, is_virtual: bool) -> Result<Option<SlotMeta>> {
+        if is_virtual {
+            self.meta_cf.get(slot)
+        } else {
+            self.t_meta_cf.get(slot)
+        }
+
+    }
+
     /// Returns true if the specified slot is full.
     pub fn is_full(&self, slot: Slot) -> bool {
         if let Ok(Some(meta)) = self.meta_cf.get(slot) {

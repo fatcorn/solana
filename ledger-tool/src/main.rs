@@ -223,9 +223,10 @@ fn output_slot(
     method: &LedgerOutputMethod,
     verbose_level: u64,
     all_program_ids: &mut HashMap<Pubkey, u64>,
+    is_virtual: bool,
 ) -> Result<(), String> {
     // todo, input valid args later, add by jesse
-    if blockstore.is_dead(slot, false) {
+    if blockstore.is_dead(slot, is_virtual) {
         if allow_dead_slots {
             if *method == LedgerOutputMethod::Print {
                 println!(" Slot is dead");
@@ -237,11 +238,11 @@ fn output_slot(
 
     // todo, input effect value later, add by jesse
     let (entries, num_shreds, is_full) = blockstore
-        .get_slot_entries_with_shred_info(slot, 0, allow_dead_slots, false)
+        .get_slot_entries_with_shred_info(slot, 0, allow_dead_slots, is_virtual)
         .map_err(|err| format!("Failed to load entries for slot {slot}: {err:?}"))?;
 
     if *method == LedgerOutputMethod::Print {
-        if let Ok(Some(meta)) = blockstore.meta(slot) {
+        if let Ok(Some(meta)) = blockstore.indeed_meta(slot, is_virtual) {
             if verbose_level >= 1 {
                 println!("  {meta:?} is_full: {is_full}");
             } else {
@@ -302,6 +303,7 @@ fn output_ledger(
     num_slots: Option<Slot>,
     verbose_level: u64,
     only_rooted: bool,
+    is_virtual: bool,
 ) {
     let slot_iterator = blockstore
         .slot_meta_iterator(starting_slot)
@@ -342,6 +344,7 @@ fn output_ledger(
             &method,
             verbose_level,
             &mut all_program_ids,
+            is_virtual
         ) {
             eprintln!("{err}");
         }
@@ -1102,6 +1105,10 @@ fn main() {
         .long("no-snapshot")
         .takes_value(false)
         .help("Do not start from a local snapshot if present");
+    let is_virtual_arg = Arg::with_name("is_virtual")
+        .long("is-virtual")
+        .takes_value(false)
+        .help("Is virtual slot");
     let accounts_index_bins = Arg::with_name("accounts_index_bins")
         .long("accounts-index-bins")
         .value_name("BINS")
@@ -1403,6 +1410,7 @@ fn main() {
             .arg(&starting_slot_arg)
             .arg(&allow_dead_slots_arg)
             .arg(&ending_slot_arg)
+            .arg(&is_virtual_arg)
             .arg(
                 Arg::with_name("num_slots")
                     .long("num-slots")
@@ -1445,6 +1453,7 @@ fn main() {
                     .help("Slots to print"),
             )
             .arg(&allow_dead_slots_arg)
+            .arg(&is_virtual_arg)
         )
         .subcommand(
             SubCommand::with_name("dead-slots")
@@ -2188,6 +2197,7 @@ fn main() {
                 let num_slots = value_t!(arg_matches, "num_slots", Slot).ok();
                 let allow_dead_slots = arg_matches.is_present("allow_dead_slots");
                 let only_rooted = arg_matches.is_present("only_rooted");
+                let is_virtual = arg_matches.is_present("is_virtual");
                 output_ledger(
                     open_blockstore(
                         &ledger_path,
@@ -2203,6 +2213,7 @@ fn main() {
                     num_slots,
                     verbose_level,
                     only_rooted,
+                    is_virtual
                 );
             }
             ("copy", Some(arg_matches)) => {
@@ -2428,6 +2439,7 @@ fn main() {
             ("slot", Some(arg_matches)) => {
                 let slots = values_t_or_exit!(arg_matches, "slots", Slot);
                 let allow_dead_slots = arg_matches.is_present("allow_dead_slots");
+                let is_virtual = arg_matches.is_present("is_virtual");
                 let blockstore = open_blockstore(
                     &ledger_path,
                     AccessType::Secondary,
@@ -2444,6 +2456,7 @@ fn main() {
                         &LedgerOutputMethod::Print,
                         verbose_level,
                         &mut HashMap::new(),
+                        is_virtual
                     ) {
                         eprintln!("{err}");
                     }
@@ -2452,6 +2465,7 @@ fn main() {
             ("json", Some(arg_matches)) => {
                 let starting_slot = value_t_or_exit!(arg_matches, "starting_slot", Slot);
                 let allow_dead_slots = arg_matches.is_present("allow_dead_slots");
+                let is_virtual = arg_matches.is_present("is_virtual");
                 output_ledger(
                     open_blockstore(
                         &ledger_path,
@@ -2467,6 +2481,7 @@ fn main() {
                     None,
                     std::u64::MAX,
                     true,
+                    is_virtual
                 );
             }
             ("dead-slots", Some(arg_matches)) => {

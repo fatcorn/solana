@@ -916,6 +916,7 @@ pub fn next_entry_mut(start: &mut Hash, num_hashes: u64, transactions: Vec<Trans
     entry
 }
 
+// todo check, whether used in test?, add by jesse
 pub fn create_ticks(num_ticks: u64, hashes_per_tick: u64, mut hash: Hash) -> Vec<Entry> {
     repeat_with(|| next_entry_mut(&mut hash, hashes_per_tick, vec![], false))
         .take(num_ticks as usize)
