@@ -115,7 +115,7 @@ impl StandardBroadcastRun {
                         false
                     );
                     t_shreds = t_shreds_in;
-                    t_coding_shreds = t_coding_shreds;
+                    t_coding_shreds = t_coding_shreds_in;
                 }
 
                 if merkle_variant {
@@ -158,6 +158,7 @@ impl StandardBroadcastRun {
         let truly_entries : Vec<_> = entries_iterator.clone().filter(|x| !x.is_vote ).cloned().collect();;
 
         let (slot, parent_slot) = self.current_slot_and_parent.unwrap();
+
         let (next_shred_index, next_code_index, t_next_shred_index, t_next_code_index) = match &self.unfinished_slot {
             Some(state) => (state.next_shred_index, state.next_code_index, state.t_next_shred_index, state.t_next_code_index),
             None => {
@@ -176,13 +177,15 @@ impl StandardBroadcastRun {
                 (0u32, 0u32, 0u32, 0u32)
             }
         };
+
         let (t_slot, t_parent_slot) = self.t_current_slot_and_parent.unwrap();
         let shredder =
             Shredder::new(slot, parent_slot, reference_tick, self.shred_version, t_slot, t_parent_slot).unwrap();
         let merkle_variant = should_use_merkle_variant(slot, cluster_type);
         let mut t_data_shreds= None ;
         let mut t_coding_shreds = None;
-        if !truly_entries.is_empty() {
+        // todo, check, if reach to v_slot end, if t_slot has txs, also generate the last shred. add by jesse
+        if !truly_entries.is_empty() || (is_slot_end && blockstore.indeed_meta(t_slot, false).unwrap().is_some()) {
             let (t_data_shreds_inner, t_coding_shreds_inner) = shredder.entries_to_shreds(
                 keypair,
                 &truly_entries,
@@ -194,6 +197,12 @@ impl StandardBroadcastRun {
                 process_stats,
                 false
             );
+            //todo, delete log, add by jesse
+            if is_slot_end {
+                warn!("generate t slot last shred, \
+                data shreds: {:?}, code shreds: {:?}", t_data_shreds_inner.clone(), t_coding_shreds_inner.clone());
+                warn!("truly_entries {:?}", truly_entries);
+            }
             t_data_shreds = Some(t_data_shreds_inner);
             t_coding_shreds = Some(t_coding_shreds_inner);
         }
@@ -215,7 +224,9 @@ impl StandardBroadcastRun {
             process_stats.num_merkle_data_shreds += data_shreds.len() + t_data_shreds_len;
             process_stats.num_merkle_coding_shreds += coding_shreds.len() + t_coding_shreds_len;
         }
-        let next_shred_index_compute = |data_shreds: &Vec<Shred>, code_shreds: &Vec<Shred>| -> std::result::Result<(u32, u32), BroadcastError> {
+        let next_shred_index_compute = |data_shreds: &Vec<Shred>, code_shreds: &Vec<Shred>, is_virtual: bool| -> std::result::Result<(u32, u32), BroadcastError> {
+            let next_shred_index = if is_virtual { next_shred_index } else { t_next_shred_index };
+            let next_code_index = if is_virtual { next_code_index } else { t_next_code_index };
             let next_shred_index = match data_shreds.iter().map(Shred::index).max() {
                 Some(index) => index + 1,
                 None => next_shred_index,
@@ -234,13 +245,16 @@ impl StandardBroadcastRun {
             Ok((next_shred_index, next_code_index))
         };
 
-        let (next_shred_index, next_code_index) = next_shred_index_compute(&data_shreds, &coding_shreds)?;
-        let mut t_next_shred_index= 0;
-        let mut t_next_code_index = 0;
-        if t_data_shreds.is_some() && t_coding_shreds.is_some() {
-            (t_next_shred_index, t_next_code_index) = next_shred_index_compute(&t_data_shreds.clone().unwrap(), &t_coding_shreds.clone().unwrap())?;
-        }
+        let (next_shred_index, next_code_index) = next_shred_index_compute(&data_shreds, &coding_shreds, true)?;
 
+        let mut t_next_shred_index= t_next_shred_index;
+        let mut t_next_code_index = t_next_code_index;
+        if t_data_shreds.is_some() && t_coding_shreds.is_some() {
+            let (t_next_shred_index_inner, t_next_code_index_inner) = next_shred_index_compute(&t_data_shreds.clone().unwrap(), &t_coding_shreds.clone().unwrap(), false)?;
+            t_next_shred_index = t_next_shred_index_inner;
+            t_next_code_index = t_next_code_index_inner;
+            info!("t slot {} shred index update, next data index: {}, next code index: {}", t_slot, t_next_shred_index, t_next_code_index);
+        }
 
         self.unfinished_slot = Some(UnfinishedSlotInfo {
             next_shred_index,
@@ -368,6 +382,22 @@ impl StandardBroadcastRun {
                     .expect("Failed to insert shreds in blockstore");
             }
         }
+        // insert first shred for t slot
+        if t_data_shreds.is_some() {
+            if let Some (shred) = t_data_shreds.clone().unwrap().first() {
+                warn!("Ready to insert t_slot {} first shred {:?}", shred.t_slot(), shred);
+                if shred.index() == 0 {
+                    blockstore
+                        .insert_shreds(
+                            vec![shred.clone()],
+                            None, // leader_schedule
+                            true, // is_trusted
+                        )
+                        .expect("Failed to insert shreds in blockstore");
+                }
+            }
+        }
+
         to_shreds_time.stop();
 
         if t_data_shreds.is_some() && !t_data_shreds.clone().unwrap().is_empty() && !bank.is_include_t_slot() {

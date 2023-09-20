@@ -23,7 +23,7 @@ pub(super) struct ReceiveResults {
     pub last_tick_height: u64,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct UnfinishedSlotInfo {
     pub next_shred_index: u32,
     pub(crate) next_code_index: u32,
