@@ -364,9 +364,9 @@ impl<'a> FundingTransactions<'a> for FundingContainer<'a> {
     ) {
         self.make(to_fund, |(k, t)| -> (FundingSigners<'a>, Transaction) {
             let mut instructions = system_instruction::transfer_many(&k.pubkey(), t);
-            instructions.push(
-                ComputeBudgetInstruction::set_loaded_accounts_data_size_limit(data_size_limit),
-            );
+            // instructions.push(
+            //     ComputeBudgetInstruction::set_loaded_accounts_data_size_limit(data_size_limit),
+            // );
             let message = Message::new(&instructions, Some(&k.pubkey()));
             (*k, Transaction::new_unsigned(message))
         });

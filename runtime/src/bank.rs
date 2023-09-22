@@ -5414,6 +5414,7 @@ impl Bank {
                     if *err_count == 0 {
                         debug!("tx error: {:?} {:?}", err, tx);
                     }
+                    warn!("executed tx err {}, err_count {}", err, err_count);
                     *err_count += 1;
                 }
             }
@@ -7155,6 +7156,7 @@ impl Bank {
             parent_hash.as_ref(),
             accounts_delta_hash.0.as_ref(),
             &signature_count_buf,
+            //todo,check, should have t_last_blockhash too. add by jesse
             self.last_blockhash().as_ref(),
         ]);
 

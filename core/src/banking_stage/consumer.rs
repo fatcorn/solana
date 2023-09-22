@@ -608,6 +608,15 @@ impl Consumer {
         let (freeze_lock, freeze_lock_us) = measure_us!(bank.freeze_lock());
         execute_and_commit_timings.freeze_lock_us = freeze_lock_us;
 
+        // update t slot with in freeze_lock, this can guarantee bank freeze the t slot.
+        // executed_transactions should not empty
+        if !is_vote && !bank.is_include_t_slot() && !executed_transactions.is_empty() {
+            // todo delete info!
+            info!("got truly txs in bank slot {}, t_slot {}", bank.slot(), bank.t_slot());
+            // todo,check, t_parent will be none?
+            bank.update_t_slot_related(bank.t_slot(), bank.t_parent_slot(), bank.t_parent().unwrap());
+        }
+
         let (record_transactions_summary, record_us) = measure_us!(self
             .transaction_recorder
             .record_transactions(bank.slot(), executed_transactions, is_vote));

@@ -599,17 +599,17 @@ fn transfer_with_compute_unit_price_and_padding(
         transfer_instruction
     };
     let mut instructions = vec![instruction];
-    if let Some(compute_unit_price) = compute_unit_price {
-        instructions.extend_from_slice(&[
-            ComputeBudgetInstruction::set_compute_unit_limit(TRANSFER_TRANSACTION_COMPUTE_UNIT),
-            ComputeBudgetInstruction::set_compute_unit_price(compute_unit_price),
-        ])
-    }
-    instructions.extend_from_slice(&[
-        ComputeBudgetInstruction::set_loaded_accounts_data_size_limit(
-            TRANSFER_TRANSACTION_LOADED_ACCOUNTS_DATA_SIZE,
-        ),
-    ]);
+    // if let Some(compute_unit_price) = compute_unit_price {
+    //     instructions.extend_from_slice(&[
+    //         ComputeBudgetInstruction::set_compute_unit_limit(TRANSFER_TRANSACTION_COMPUTE_UNIT),
+    //         ComputeBudgetInstruction::set_compute_unit_price(compute_unit_price),
+    //     ])
+    // }
+    // instructions.extend_from_slice(&[
+    //     ComputeBudgetInstruction::set_loaded_accounts_data_size_limit(
+    //         TRANSFER_TRANSACTION_LOADED_ACCOUNTS_DATA_SIZE,
+    //     ),
+    // ]);
     let message = Message::new(&instructions, Some(&from_pubkey));
     Transaction::new(&[from_keypair], message, recent_blockhash)
 }
