@@ -200,6 +200,7 @@ pub struct ForkProgress {
     // t_fork_stats maybe not need, add by jesse
     // pub t_fork_stats: ForkStats,
     pub linked_t_slot: Option<Slot>,
+    // todo, check, this member maybe not need too, add by jesse
     pub t_replay_progress: Arc<RwLock<ConfirmationProgress>>,
 }
 

@@ -3020,6 +3020,7 @@ impl ReplayStage {
             )
         };
         // First do t slots, and t slots may not complete a bank, todo check later, add by jesse
+        // todo, is there a problem? t num_active bank made bank freeze? seems like not.
         if t_num_active_banks > 0 {
             replay_slots(t_active_bank_slots, false, block_metadata_notifier.clone());
         }

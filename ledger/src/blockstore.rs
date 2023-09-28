@@ -1356,6 +1356,7 @@ impl Blockstore {
         // TODO: handle_duplicate is not invoked and so duplicate shreds are
         // not gossiped to the rest of cluster.
         if !erasure_meta.check_coding_shred(&shred) {
+            warn!("------self may != &other");
             metrics.num_coding_shreds_invalid_erasure_config += 1;
             let conflicting_shred = self.find_conflicting_coding_shred(
                 &shred,

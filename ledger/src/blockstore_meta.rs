@@ -350,6 +350,7 @@ impl ErasureMeta {
     // are consistent with the erasure-meta.
     pub(crate) fn check_coding_shred(&self, shred: &Shred) -> bool {
         let Some(mut other) = Self::from_coding_shred(shred) else {
+            warn!("--------shred from_coding_shred failed");
             return false;
         };
         other.__unused_size = self.__unused_size;
