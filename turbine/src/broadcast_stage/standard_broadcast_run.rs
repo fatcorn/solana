@@ -198,11 +198,11 @@ impl StandardBroadcastRun {
                 false
             );
             //todo, delete log, add by jesse
-            if is_slot_end {
-                warn!("generate t slot last shred, \
-                data shreds: {:?}, code shreds: {:?}", t_data_shreds_inner.clone(), t_coding_shreds_inner.clone());
-                warn!("truly_entries {:?}", truly_entries);
-            }
+            // if is_slot_end {
+            //     warn!("generate t slot last shred, \
+            //     data shreds: {:?}, code shreds: {:?}", t_data_shreds_inner.clone(), t_coding_shreds_inner.clone());
+            //     warn!("truly_entries {:?}", truly_entries);
+            // }
             t_data_shreds = Some(t_data_shreds_inner);
             t_coding_shreds = Some(t_coding_shreds_inner);
         }
@@ -385,7 +385,8 @@ impl StandardBroadcastRun {
         // insert first shred for t slot
         if t_data_shreds.is_some() {
             if let Some (shred) = t_data_shreds.clone().unwrap().first() {
-                warn!("Ready to insert t_slot {} first shred {:?}", shred.t_slot(), shred);
+                // todo delete warn log
+                // warn!("Ready to insert t_slot {} first shred {:?}", shred.t_slot(), shred);
                 if shred.index() == 0 {
                     blockstore
                         .insert_shreds(

@@ -532,18 +532,20 @@ impl Tower {
         // TODO, input valid args, add by jesse
         let vote = Vote::new(vec![slot], hash, vec![t_vote_slot], t_vote_hash);
         process_vote_unchecked(local_vote_state, vote);
-        let slots = if let Some(last_voted_slot) = last_voted_slot_in_bank {
+        let slots_vec = if let Some(last_voted_slot) = last_voted_slot_in_bank {
             local_vote_state
                 .votes
                 .iter()
-                .map(|v| v.slot())
-                .skip_while(|s| *s <= last_voted_slot)
-                .collect()
+                .map(|v| (v.slot(), v.t_slot()))
+                .skip_while(|s| s.0 <= last_voted_slot)
+                .collect::<Vec<(Slot, Option<Slot>)>>()
         } else {
-            local_vote_state.votes.iter().map(|v| v.slot()).collect()
+            local_vote_state.votes.iter().map(|v| (v.slot(), v.t_slot())).collect()
         };
+        let slots = slots_vec.iter().map(|x| x.0).collect();
+        let t_slots = slots_vec.iter().map(|x| x.1).collect();
         // TODO, input valid args, add by jesse
-        VoteTransaction::from(Vote::new(slots, hash, vec![t_vote_slot], t_vote_hash))
+        VoteTransaction::from(Vote::new(slots, hash, t_slots, t_vote_hash))
     }
 
     pub fn last_voted_slot_in_bank(bank: &Bank, vote_account_pubkey: &Pubkey) -> Option<Slot> {

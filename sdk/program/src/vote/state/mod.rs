@@ -140,6 +140,10 @@ impl LandedVote {
         self.lockout.slot
     }
 
+    pub fn t_slot(&self) -> Option<Slot> {
+        self.lockout.t_slot
+    }
+
     pub fn confirmation_count(&self) -> u32 {
         self.lockout.confirmation_count
     }

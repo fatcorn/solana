@@ -104,8 +104,8 @@ impl PacketReceiver {
     ) {
         let packet_count = deserialized_packets.len();
         debug!("@{:?} txs: {} id: {}", timestamp(), packet_count, self.id);
-        warn!("@{:?} txs: {} id: {} storage: {:?}", timestamp(), packet_count, self.id, unprocessed_transaction_storage);
-
+        // todo delete warn log
+        // warn!("@{:?} txs: {} id: {} storage: {:?}", timestamp(), packet_count, self.id, unprocessed_transaction_storage);
         if let Some(new_sigverify_stats) = &new_tracer_stats_option {
             tracer_packet_stats.aggregate_sigverify_tracer_packet_stats(new_sigverify_stats);
         }

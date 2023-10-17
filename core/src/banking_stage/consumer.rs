@@ -484,7 +484,8 @@ impl Consumer {
         // and WouldExceedMaxAccountDataCostLimit
         let mut execute_and_commit_transactions_output =
             self.execute_and_commit_transactions_locked(bank, &batch, is_vote);
-        warn!("banking stage execute txs result {:?}", execute_and_commit_transactions_output);
+        // todo delete warn log
+        // warn!("banking stage execute txs result {:?}", execute_and_commit_transactions_output);
         // Once the accounts are new transactions can enter the pipeline to process them
         let (_, unlock_us) = measure_us!(drop(batch));
 

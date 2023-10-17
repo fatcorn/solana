@@ -5414,7 +5414,7 @@ impl Bank {
                     if *err_count == 0 {
                         debug!("tx error: {:?} {:?}", err, tx);
                     }
-                    warn!("executed tx err {}, err_count {}", err, err_count);
+                    warn!("executed tx err {}, err_count {}, slot {}", err, err_count, self.slot());
                     *err_count += 1;
                 }
             }
