@@ -450,6 +450,7 @@ impl HeaviestSubtreeForkChoice {
 
         let parent = parent.unwrap();
 
+        info!("parent fork info {:?}", parent);
         // Parent must already exist by time child is being added
         self.fork_infos
             .get_mut(&parent)

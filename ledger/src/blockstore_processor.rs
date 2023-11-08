@@ -761,12 +761,13 @@ pub fn process_blockstore_from_root(
     entry_notification_sender: Option<&EntryNotifierSender>,
     accounts_background_request_sender: &AbsRequestSender,
 ) -> result::Result<(), BlockstoreProcessorError> {
-    let (start_slot, start_slot_hash) = {
+    // todo,check needed? add t_slot, and t slot hash for may future use, add by jesse
+    let (start_slot, start_slot_hash, start_t_slot, start_t_slot_hash) = {
         // Starting slot must be a root, and thus has no parents
         assert_eq!(bank_forks.read().unwrap().banks().len(), 1);
         let bank = bank_forks.read().unwrap().root_bank();
         assert!(bank.parent().is_none());
-        (bank.slot(), bank.hash())
+        (bank.slot(), bank.hash(), bank.t_slot(), bank.t_hash())
     };
 
     info!("Processing ledger from slot {}...", start_slot);
@@ -1058,6 +1059,11 @@ pub struct ConfirmationProgress {
     pub num_shreds: u64,
     pub num_entries: usize,
     pub num_txs: usize,
+    // t slot consumed status, add by jesse
+    // pub t_num_shreds: u64,
+    // pub t_num_entries: usize,
+    // pub t_num_txs: usize,
+    pub t_slot_consumed_over: bool,
 }
 
 impl ConfirmationProgress {
@@ -1112,6 +1118,7 @@ pub fn confirm_slot(
         recyclers,
         log_messages_bytes_limit,
         prioritization_fee_cache,
+        is_virtual
     )
 }
 
@@ -1128,6 +1135,7 @@ fn confirm_slot_entries(
     recyclers: &VerifyRecyclers,
     log_messages_bytes_limit: Option<usize>,
     prioritization_fee_cache: &PrioritizationFeeCache,
+    is_virtual: bool,
 ) -> result::Result<(), BlockstoreProcessorError> {
     let ConfirmationTiming {
         confirmation_elapsed,
@@ -1169,6 +1177,10 @@ fn confirm_slot_entries(
             let next_tx_starting_index = entry_tx_starting_index.saturating_add(num_txs);
             entry_tx_starting_indexes.push(entry_tx_starting_index);
             entry_tx_starting_index = next_tx_starting_index;
+            if is_virtual && entry.is_include_t_slot {
+                info!("the slot include truly txs, ready to update the state");
+                bank.update_t_frozen_flag_from_v_entry(true);
+            }
             num_txs
         })
         .sum::<usize>();
@@ -1181,12 +1193,12 @@ fn confirm_slot_entries(
         slot_full,
     );
 
-    if !skip_verification {
+    if !skip_verification && is_virtual {
         let tick_hash_count = &mut progress.tick_hash_count;
         verify_ticks(bank, &entries, slot_full, tick_hash_count).map_err(|err| {
             warn!(
                 "{:#?}, slot: {}, entry len: {}, tick_height: {}, last entry: {}, \
-                last_blockhash: {}, shred_index: {}, slot_full: {}",
+                last_blockhash: {}, shred_index: {}, slot_full: {}, is_virtual {}",
                 err,
                 slot,
                 num_entries,
@@ -1195,13 +1207,14 @@ fn confirm_slot_entries(
                 bank.last_blockhash(),
                 num_shreds,
                 slot_full,
+                is_virtual,
             );
             err
         })?;
     }
 
     let last_entry_hash = entries.last().map(|e| e.hash);
-    let verifier = if !skip_verification {
+    let verifier = if false {
         datapoint_debug!("verify-batch-size", ("size", num_entries as i64, i64));
         let entry_state = entries.start_verify(&progress.last_entry, recyclers.clone());
         if entry_state.status() == EntryVerificationStatus::Failure {
@@ -1306,6 +1319,11 @@ fn confirm_slot_entries(
     progress.num_shreds += num_shreds;
     progress.num_entries += num_entries;
     progress.num_txs += num_txs;
+
+    if !is_virtual {
+        progress.t_slot_consumed_over = slot_full;
+    }
+
     if let Some(last_entry_hash) = last_entry_hash {
         progress.last_entry = last_entry_hash;
     }

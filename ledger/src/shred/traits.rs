@@ -40,7 +40,9 @@ pub(super) trait ShredData: for<'a> Shred<'a> {
     fn data_header(&self) -> &DataShredHeader;
 
     fn parent(&self) -> Result<Slot, Error> {
-        let slot = self.common_header().slot;
+        // todo,check, add t slot parent compute logic
+        let is_virtual = self.common_header().is_virtual;
+        let slot = if is_virtual { self.common_header().slot } else { self.common_header().t_slot};
         let parent_offset = self.data_header().parent_offset;
         if parent_offset == 0 && slot != 0 {
             return Err(Error::InvalidParentOffset {

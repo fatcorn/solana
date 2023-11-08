@@ -91,6 +91,15 @@ impl Shredder {
         Vec<Shred>, // data shreds
         Vec<Shred>, // coding shreds
     ) {
+        // todo,delete,for debugging, add by jesse
+        let parent_offset = if is_virtual { self.slot - self.parent_slot } else { self.t_slot - self.t_parent_slot };
+        info!("----check parent_offset, slot {},\
+                     parent_slot{},\
+                      t slot {},\
+                       tp slot {}\
+                       parent_offset {},\
+                       is_virtual {}",
+                    self.slot,self.parent_slot,self.t_slot,self.t_parent_slot,parent_offset, is_virtual);
         if merkle_variant {
             return shred::make_merkle_shreds_from_entries(
                 &PAR_THREAD_POOL,
@@ -147,6 +156,7 @@ impl Shredder {
         // Integer division to ensure we have enough shreds to fit all the data
         let num_shreds = (serialized_shreds.len() + data_buffer_size - 1) / data_buffer_size;
         let last_shred_index = next_shred_index + num_shreds as u32 - 1;
+
         // 1) Generate data shreds
         let make_data_shred = |data, shred_index: u32, fec_set_index: u32| {
             let flags = if shred_index != last_shred_index {

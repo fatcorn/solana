@@ -39,6 +39,7 @@ use {
     },
     tokio::sync::mpsc::Sender as AsyncSender,
 };
+use solana_ledger::shred::Shred;
 
 const MAX_DUPLICATE_COUNT: usize = 2;
 const DEDUPER_FALSE_POSITIVE_RATE: f64 = 0.001;
@@ -329,6 +330,19 @@ fn retransmit_shred(
 
     let mut retransmit_time = Measure::start("retransmit_to");
     let num_addrs = addrs.len();
+    let shd = Shred::new_from_serialized_shred(shred.to_vec()).unwrap();
+    info!(
+            "retransmit slot {}, t slot {}, index {} to {:?},\
+             is t slot {}, shred type {:?}, last in slot {}, last in data {}",
+            shd.slot(),
+            shd.t_slot(),
+            shd.index(),
+            addrs,
+            !shd.is_virtual(),
+            shd.shred_type(),
+            shd.last_in_slot(),
+            shd.data_complete()
+            );
     let num_nodes = match cluster_nodes::get_broadcast_protocol(key) {
         Protocol::QUIC => {
             let shred = Bytes::copy_from_slice(shred);

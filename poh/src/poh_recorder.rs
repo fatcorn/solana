@@ -756,7 +756,7 @@ impl PohRecorder {
         }
     }
 
-    pub fn tick(&mut self) {
+    pub fn tick(&mut self, see_truly_tx_before: bool) {
         let ((poh_entry, target_time), tick_lock_contention_time) = measure!(
             {
                 let mut poh_l = self.poh.lock().unwrap();
@@ -790,7 +790,8 @@ impl PohRecorder {
                     hash: poh_entry.hash,
                     transactions: vec![],
                     // Take tick to virtual slot, so last tick will enter in virtual slot,add by jesse
-                    is_vote: true
+                    is_vote: true,
+                    is_include_t_slot: poh_entry.saw_truly_tx_before
                 },
                 self.tick_height,
             ));
@@ -882,7 +883,7 @@ impl PohRecorder {
             self.record_lock_contention_us += poh_lock_time.as_us();
 
             let (record_mixin_res, record_mixin_time) =
-                measure!(poh_lock.record(mixin), "record_mixin");
+                measure!(poh_lock.record(mixin, is_vote), "record_mixin");
             self.record_us += record_mixin_time.as_us();
 
             drop(poh_lock);
@@ -896,6 +897,7 @@ impl PohRecorder {
                             hash: poh_entry.hash,
                             transactions,
                             is_vote,
+                            is_include_t_slot: !is_vote
                         };
                         let bank_clone = working_bank.bank.clone();
                         self.sender.send((bank_clone, (entry, self.tick_height)))
@@ -917,7 +919,7 @@ impl PohRecorder {
             // record() might fail if the next PoH hash needs to be a tick.  But that's ok, tick()
             // and re-record()
             self.ticks_from_record += 1;
-            self.tick();
+            self.tick(!is_vote && record_mixin_res.is_some());
         }
     }
 

@@ -70,6 +70,7 @@ struct DeserializableVersionedBank {
     t_block_height: u64,
     t_ancestors: AncestorsForSerialization,
     is_t_slot_exist: bool,
+    t_frozen_flag_from_v_entry: bool,
 }
 
 impl From<DeserializableVersionedBank> for BankFieldsToDeserialize {
@@ -116,6 +117,7 @@ impl From<DeserializableVersionedBank> for BankFieldsToDeserialize {
             t_block_height: dvb.t_block_height,
             t_ancestors: dvb.t_ancestors,
             is_t_slot_exist: dvb.is_t_slot_exist,
+            t_frozen_flag_from_v_entry: dvb.t_frozen_flag_from_v_entry
         }
     }
 }
@@ -165,6 +167,7 @@ struct SerializableVersionedBank<'a> {
     t_block_height: u64,
     t_ancestors: &'a AncestorsForSerialization,
     is_t_slot_exist: bool,
+    t_frozen_flag_from_v_entry: bool,
 }
 
 impl<'a> From<crate::bank::BankFieldsToSerialize<'a>> for SerializableVersionedBank<'a> {
@@ -210,6 +213,7 @@ impl<'a> From<crate::bank::BankFieldsToSerialize<'a>> for SerializableVersionedB
             t_block_height: rhs.t_block_height,
             t_ancestors: rhs.t_ancestors,
             is_t_slot_exist: rhs.is_t_slot_exist,
+            t_frozen_flag_from_v_entry: rhs.t_frozen_flag_from_v_entry,
         }
     }
 }
@@ -457,6 +461,7 @@ impl<'a> TypeContext<'a> for Context {
             t_block_height: rhs.t_block_height,
             t_ancestors: &rhs.t_ancestors,
             is_t_slot_exist: rhs.is_t_slot_exist,
+            t_frozen_flag_from_v_entry: rhs.t_frozen_flag_from_v_entry
         };
 
         match get_serialize_bank_fields(

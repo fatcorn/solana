@@ -365,6 +365,7 @@ impl BroadcastStage {
         retransmit_slots_receiver: &Receiver<Slot>,
         socket_sender: &Sender<(Arc<Vec<Shred>>, Option<BroadcastShredBatchInfo>)>,
     ) -> Result<()> {
+        // todo, this code should be fix, add by jesse.
         const RECV_TIMEOUT: Duration = Duration::from_millis(100);
         let retransmit_slots: HashSet<Slot> =
             std::iter::once(retransmit_slots_receiver.recv_timeout(RECV_TIMEOUT)?)
@@ -447,7 +448,7 @@ pub fn broadcast_shreds(
                 cluster_nodes_cache.get(slot, &root_bank, &working_bank, cluster_info);
             update_peer_stats(&cluster_nodes, last_datapoint_submit);
             shreds.filter_map(move |shred| {
-                let key = shred.id();
+                let key = shred.v_id();
                 let protocol = cluster_nodes::get_broadcast_protocol(&key);
                 cluster_nodes
                     .get_broadcast_peer(&key)?
@@ -455,6 +456,18 @@ pub fn broadcast_shreds(
                     .ok()
                     .filter(|addr| socket_addr_space.check(addr))
                     .map(|addr| {
+                        info!(
+                            "broadcast slot {}, t slot {}, index {} to {:?},\
+                             is t slot {}, shred type {:?}, last in slot {}, last in data {}",
+                            shred.slot(),
+                            shred.t_slot(),
+                            shred.index(),
+                            addr,
+                            shred.is_virtual(),
+                            shred.shred_type(),
+                            shred.last_in_slot(),
+                            shred.data_complete()
+                        );
                         (match protocol {
                             Protocol::QUIC => Either::Right,
                             Protocol::UDP => Either::Left,

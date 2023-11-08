@@ -14,12 +14,15 @@ pub struct Poh {
     remaining_hashes: u64,
     tick_number: u64,
     slot_start_time: Instant,
+    // is observe truly tx in slot, add by jesse
+    include_t_slot: Option<bool>,
 }
 
 #[derive(Debug)]
 pub struct PohEntry {
     pub num_hashes: u64,
     pub hash: Hash,
+    pub saw_truly_tx_before: bool,
 }
 
 impl Poh {
@@ -38,6 +41,7 @@ impl Poh {
             remaining_hashes: hashes_per_tick,
             tick_number,
             slot_start_time: now,
+            include_t_slot: None
         }
     }
 
@@ -71,19 +75,28 @@ impl Poh {
         self.remaining_hashes == 1 // Return `true` if caller needs to `tick()` next
     }
 
-    pub fn record(&mut self, mixin: Hash) -> Option<PohEntry> {
+    pub fn record(&mut self, mixin: Hash, is_vote: bool) -> Option<PohEntry> {
         if self.remaining_hashes == 1 {
             return None; // Caller needs to `tick()` first
         }
 
         self.hash = hashv(&[self.hash.as_ref(), mixin.as_ref()]);
         let num_hashes = self.num_hashes + 1;
-        self.num_hashes = 0;
-        self.remaining_hashes -= 1;
+        // todo, check, t_slot num_hash not count in v_slot, in replay stage, if slot include truly tx, will
+        // todo, throw invalid tick hash count! err, so for truly tx record, would not change the poh for now,
+        // todo, add by jesse.
+        if is_vote {
+            self.num_hashes = 0;
+            self.remaining_hashes -= 1;
+        } else {
+            // todo,check if this is truly tx record, update the include_t_slot
+            self.include_t_slot = Some(true);
+        }
 
         Some(PohEntry {
             num_hashes,
             hash: self.hash,
+            saw_truly_tx_before: false
         })
     }
 
@@ -102,9 +115,16 @@ impl Poh {
         self.remaining_hashes = self.hashes_per_tick;
         self.num_hashes = 0;
         self.tick_number += 1;
+
+        let mut state = false;
+        if let Some(state_inner) = self.include_t_slot.take() {
+            state = state_inner;
+        }
+
         Some(PohEntry {
             num_hashes,
             hash: self.hash,
+            saw_truly_tx_before: state
         })
     }
 }

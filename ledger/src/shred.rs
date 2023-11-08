@@ -102,9 +102,12 @@ const SIZE_OF_SIGNATURE: usize = SIGNATURE_BYTES;
 const SIZE_OF_SHRED_VARIANT: usize = 1;
 const SIZE_OF_SHRED_SLOT: usize = 8;
 
+const SIZE_OF_SHRED_IS_VIRTUAL: usize = 1;
+
 const OFFSET_OF_SHRED_VARIANT: usize = SIZE_OF_SIGNATURE;
 const OFFSET_OF_SHRED_SLOT: usize = SIZE_OF_SIGNATURE + SIZE_OF_SHRED_VARIANT;
 const OFFSET_OF_SHRED_INDEX: usize = OFFSET_OF_SHRED_SLOT + SIZE_OF_SHRED_SLOT;
+const OFFSET_OF_SHRED_IS_VIRTUAL: usize = SIZE_OF_COMMON_SHRED_HEADER - SIZE_OF_SHRED_IS_VIRTUAL;
 
 // Shreds are uniformly split into erasure batches with a "target" number of
 // data shreds per each batch as below. The actual number of data shreds in
@@ -251,11 +254,14 @@ impl<'a> AsRef<[u8]> for SignedData<'a> {
 
 /// Tuple which uniquely identifies a shred should it exists.
 #[derive(Clone, Copy, Eq, Debug, Hash, PartialEq)]
-pub struct ShredId(Slot, /*shred index:*/ u32, ShredType);
+// todo, check, this type may influence(may be not, if, not, remove the is_virtual flag) the leader broadcast,
+// todo and layer 0(root) retransmit target, so add the is_virtual flag distinct the t shreds ahd v shreds in the same index and same slot
+pub struct ShredId(Slot, /*shred index:*/ u32, ShredType, /*is_virtual*/bool);
 
 impl ShredId {
     pub(crate) fn new(slot: Slot, index: u32, shred_type: ShredType) -> ShredId {
-        ShredId(slot, index, shred_type)
+        // todo, check, if is_virtual works, input the valid data, add by jesse
+        ShredId(slot, index, shred_type, false)
     }
 
     pub fn slot(&self) -> Slot {
@@ -267,12 +273,13 @@ impl ShredId {
     }
 
     pub fn seed(&self, leader: &Pubkey) -> [u8; 32] {
-        let ShredId(slot, index, shred_type) = self;
+        let ShredId(slot, index, shred_type, is_virtual) = self;
         hashv(&[
             &slot.to_le_bytes(),
             &u8::from(*shred_type).to_le_bytes(),
             &index.to_le_bytes(),
             AsRef::<[u8]>::as_ref(leader),
+            &vec![*is_virtual as u8],
         ])
         .to_bytes()
     }
@@ -429,7 +436,11 @@ impl Shred {
     /// Unique identifier for each shred.
     //todo check if the replace the slot to indeed slot will generate influence, add by jesse
     pub fn id(&self) -> ShredId {
-        ShredId(self.indeed_slot(), self.index(), self.shred_type())
+        ShredId(self.indeed_slot(), self.index(), self.shred_type(), self.is_virtual())
+    }
+
+    pub fn v_id(&self) -> ShredId {
+        ShredId(self.slot(), self.index(), self.shred_type(), self.is_virtual())
     }
 
     pub fn slot(&self) -> Slot {
@@ -647,6 +658,16 @@ pub mod layout {
     }
 
     #[inline]
+    pub fn get_is_virtual(shred: &[u8]) -> Option<bool> {
+       let byte : [u8; 1] = <[u8; 1]>::try_from(shred.get(OFFSET_OF_SHRED_IS_VIRTUAL..)?.get(..1)?).map(|x| x).ok()?;
+        match byte[0] {
+            0 => Some(false),
+            1 => Some(true),
+            _ => None
+        }
+    }
+
+    #[inline]
     pub(super) fn get_index(shred: &[u8]) -> Option<u32> {
         <[u8; 4]>::try_from(shred.get(OFFSET_OF_SHRED_INDEX..)?.get(..4)?)
             .map(u32::from_le_bytes)
@@ -674,6 +695,7 @@ pub mod layout {
             get_slot(shred)?,
             get_index(shred)?,
             get_shred_type(shred).ok()?,
+            get_is_virtual(shred)?
         ))
     }
 

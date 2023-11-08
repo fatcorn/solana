@@ -468,6 +468,7 @@ pub struct BankFieldsToDeserialize {
     pub(crate) t_block_height: u64,
     pub(crate) t_ancestors: AncestorsForSerialization,
     pub(crate) is_t_slot_exist: bool,
+    pub(crate) t_frozen_flag_from_v_entry: bool,
 }
 
 /// Bank's common fields shared by all supported snapshot versions for serialization.
@@ -519,6 +520,7 @@ pub(crate) struct BankFieldsToSerialize<'a> {
     pub(crate) t_block_height: u64,
     pub(crate) t_ancestors: &'a AncestorsForSerialization,
     pub(crate) is_t_slot_exist: bool,
+    pub(crate) t_frozen_flag_from_v_entry: bool,
 }
 
 // Can't derive PartialEq because RwLock doesn't implement PartialEq
@@ -571,6 +573,7 @@ impl PartialEq for Bank {
             epoch_stakes,
             is_delta,
             is_t_slot_exist,
+            t_frozen_flag_from_v_entry,
             // TODO: Confirm if all these fields are intentionally ignored!
             builtin_programs: _,
             runtime_config: _,
@@ -636,6 +639,7 @@ impl PartialEq for Bank {
             && *t_slot.read().unwrap() == *other.t_slot.read().unwrap()
             && *t_hash.read().unwrap() == *other.t_hash.read().unwrap()
             && *is_t_slot_exist.read().unwrap() == *other.is_t_slot_exist.read().unwrap()
+            &&  *t_frozen_flag_from_v_entry.read().unwrap() == *other.t_frozen_flag_from_v_entry.read().unwrap()
     }
 }
 
@@ -884,6 +888,8 @@ pub struct Bank {
 
     /// The set of parents including this truly bank
     pub t_ancestors: Ancestors,
+    /// Virtual entry imply this bank has truly tx, if have, it will decide when to freeze
+    pub t_frozen_flag_from_v_entry: RwLock<bool>,
 }
 
 struct VoteWithStakeDelegations {
@@ -1137,6 +1143,7 @@ impl Bank {
             t_ancestors: Ancestors::default(),
             // todo, check, genesis is a t slot too, add by jesse.
             is_t_slot_exist: RwLock::new(true),
+            t_frozen_flag_from_v_entry: RwLock::new(false),
         };
 
         let accounts_data_size_initial = bank.get_total_accounts_stats().unwrap().data_len as u64;
@@ -1411,10 +1418,13 @@ impl Bank {
         let (feature_set, feature_set_time_us) = measure_us!(parent.feature_set.clone());
 
         let accounts_data_size_initial = parent.load_accounts_data_size();
-        let t_slot = if parent.is_include_t_slot() {
-            parent.t_slot() + 1
+
+        let (t_slot, t_parent_slot, t_parent_hash) = if parent.is_include_t_slot() {
+            (parent.t_slot() + 1, parent.t_slot(), parent.t_hash())
         } else {
-            parent.t_slot()
+            //if current slot's parent not, include truly slot, it's t_slot is parent's t_slot,
+            // t_parent_slot still is parent's t_parent_slot, add by jesse
+            (parent.t_slot(), parent.t_parent_slot(), parent.t_parent_hash())
         };
         let mut new = Self {
             incremental_snapshot_persistence: None,
@@ -1426,15 +1436,15 @@ impl Bank {
             blockhash_queue,
 
             // For split poh consensus
-            t_parent_slot: RwLock::new(parent.t_slot()),
-            t_parent_hash: RwLock::new(parent.t_hash()),
+            t_parent_slot: RwLock::new(t_parent_slot),
+            t_parent_hash: RwLock::new(t_parent_hash),
             t_hash: RwLock::new(Hash::default()),
             // todo, wait for func input, add by jesse
             t_slot: RwLock::new(t_slot),
             t_block_height: RwLock::new(parent.t_block_height()),
             t_ancestors: Ancestors::default(),
             is_t_slot_exist: RwLock::new(false),
-
+            t_frozen_flag_from_v_entry: RwLock::new(false),
 
             // TODO: clean this up, so much special-case copying...
             hashes_per_tick: parent.hashes_per_tick,
@@ -1805,6 +1815,7 @@ impl Bank {
             .filter(move |slot| *slot != self.t_slot())
     }
 
+
     pub fn set_callback(&self, callback: Option<Box<dyn DropCallback + Send + Sync>>) {
         *self.drop_callback.write().unwrap() = OptionalDropCallback(callback);
     }
@@ -1965,6 +1976,7 @@ impl Bank {
             t_block_height:  RwLock::new(fields.t_block_height),
             t_ancestors,
             is_t_slot_exist:  RwLock::new(fields.is_t_slot_exist),
+            t_frozen_flag_from_v_entry: RwLock::new(fields.t_frozen_flag_from_v_entry),
         };
         bank.finish_init(
             genesis_config,
@@ -2066,6 +2078,7 @@ impl Bank {
             t_block_height: *self.t_block_height.read().unwrap(),
             t_ancestors,
             is_t_slot_exist: *self.is_t_slot_exist.read().unwrap(),
+            t_frozen_flag_from_v_entry: *self.t_frozen_flag_from_v_entry.read().unwrap(),
         }
     }
 
@@ -2121,6 +2134,11 @@ impl Bank {
 
     pub fn is_include_t_slot(&self) -> bool {
         *self.is_t_slot_exist.read().unwrap()
+    }
+
+    /// Returns t_frozen_flag_from_v_entry
+    pub fn t_frozen_flag_from_v_entry(&self) -> bool {
+        *self.t_frozen_flag_from_v_entry.read().unwrap()
     }
 
     pub fn freeze_started(&self) -> bool {
@@ -8395,6 +8413,10 @@ impl Bank {
         *self.rc.t_parent.write().unwrap() = Some(t_parent.clone());
         info!("update_t_slot_related, the block{} is a truly block", self.slot);
         *self.is_t_slot_exist.write().unwrap() = true;
+    }
+
+    pub fn update_t_frozen_flag_from_v_entry(&self, state: bool) {
+        *self.t_frozen_flag_from_v_entry.write().unwrap() = state;
     }
 }
 

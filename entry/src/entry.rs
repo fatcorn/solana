@@ -145,6 +145,8 @@ pub struct Entry {
     pub transactions: Vec<VersionedTransaction>,
     /// Is from vote record, add by jesse
     pub is_vote: bool,
+    /// Is include t slot in this slot, record in entry for validator replaying, add by jesse
+    pub is_include_t_slot: bool,
 }
 
 pub struct EntrySummary {
@@ -188,7 +190,9 @@ impl Entry {
             num_hashes,
             hash,
             transactions,
-            is_vote
+            is_vote,
+            // todo, check, this fn may use for poh verify, set default value for now, add by jesse
+            is_include_t_slot: false
         }
     }
 
@@ -211,7 +215,8 @@ impl Entry {
             num_hashes,
             hash: *hash,
             transactions: vec![],
-            is_vote: false
+            is_vote: false,
+            is_include_t_slot: false
         }
     }
 
@@ -266,7 +271,8 @@ pub fn next_hash(
     if transactions.is_empty() {
         poh.tick().unwrap().hash
     } else {
-        poh.record(hash_transactions(transactions)).unwrap().hash
+        // todo, check, is till use hash verify, close verify for now, so this arg will check later, add by jesse
+        poh.record(hash_transactions(transactions), true).unwrap().hash
     }
 }
 
@@ -387,7 +393,8 @@ impl EntryVerificationState {
                         .all(|(hash, (action, expected))| {
                             let actual = match action {
                                 VerifyAction::Mixin(mixin) => {
-                                    Poh::new(hash, None).record(mixin).unwrap().hash
+                                    // todo, check, is till use hash verify, close verify for now, so this arg will check later, add by jesse
+                                    Poh::new(hash, None).record(mixin, true).unwrap().hash
                                 }
                                 VerifyAction::Tick => Poh::new(hash, None).tick().unwrap().hash,
                                 VerifyAction::None => hash,
@@ -615,7 +622,8 @@ fn compare_hashes(computed_hash: Hash, ref_entry: &Entry) -> bool {
     let actual = if !ref_entry.transactions.is_empty() {
         let tx_hash = hash_transactions(&ref_entry.transactions);
         let mut poh = Poh::new(computed_hash, None);
-        poh.record(tx_hash).unwrap().hash
+        // todo, check, is till use hash verify, close verify for now, so this arg will check later, add by jesse
+        poh.record(tx_hash, true).unwrap().hash
     } else if ref_entry.num_hashes > 0 {
         let mut poh = Poh::new(computed_hash, None);
         poh.tick().unwrap().hash
@@ -654,7 +662,9 @@ impl EntrySlice for [Entry] {
             num_hashes: 0,
             hash: *start_hash,
             transactions: vec![],
-            is_vote: false
+            // todo, poh verify, check later, add by jesse
+            is_vote: false,
+            is_include_t_slot: false
         }];
         let entry_pairs = genesis.par_iter().chain(self).zip(self);
         let res = PAR_THREAD_POOL.install(|| {
@@ -691,6 +701,7 @@ impl EntrySlice for [Entry] {
             hash: *start_hash,
             transactions: vec![],
             is_vote: false,
+            is_include_t_slot: false
         }];
 
         let aligned_len = ((self.len() + simd_len - 1) / simd_len) * simd_len;
@@ -802,7 +813,8 @@ impl EntrySlice for [Entry] {
             num_hashes: 0,
             hash: *start_hash,
             transactions: vec![],
-            is_vote: false
+            is_vote: false,
+            is_include_t_slot: false
         }];
 
         let hashes: Vec<Hash> = genesis
@@ -950,7 +962,9 @@ pub fn next_versioned_entry(
         num_hashes,
         hash: next_hash(prev_hash, num_hashes, &transactions),
         transactions,
-        is_vote
+        is_vote,
+        // todo, check, this fn may use for poh verify, set default value for now, add by jesse
+        is_include_t_slot: false,
     }
 }
 

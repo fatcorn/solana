@@ -530,7 +530,10 @@ fn main() -> Result<(), Box<dyn error::Error>> {
     let commission = value_t_or_exit!(matches, "vote_commission_percentage", u8);
 
     let mut bootstrap_validator_pubkeys_iter = bootstrap_validator_pubkeys.iter();
+    // todo, remove, for now, if stake is same, seems like it will effect consensus in mutil nodes test,add by jesse
+    let mut i = 1u64;
     loop {
+
         let Some(identity_pubkey) = bootstrap_validator_pubkeys_iter.next() else {
             break;
         };
@@ -559,10 +562,10 @@ fn main() -> Result<(), Box<dyn error::Error>> {
                 vote_pubkey,
                 &vote_account,
                 &rent,
-                bootstrap_validator_stake_lamports,
+                bootstrap_validator_stake_lamports + i * 20000,
             ),
         );
-
+        i += 1;
         genesis_config.add_account(*vote_pubkey, vote_account);
     }
 

@@ -178,7 +178,7 @@ impl PohService {
             );
             if remaining_tick_time.is_zero() {
                 last_tick = Instant::now();
-                poh_recorder.write().unwrap().tick();
+                poh_recorder.write().unwrap().tick(false);
             }
         }
     }
@@ -226,7 +226,7 @@ impl PohService {
             );
             if remaining_tick_time.is_zero() {
                 last_tick = Instant::now();
-                poh_recorder.write().unwrap().tick();
+                poh_recorder.write().unwrap().tick(false);
                 elapsed_ticks += 1;
             }
             if poh_exit.load(Ordering::Relaxed) && !warned {
@@ -360,7 +360,7 @@ impl PohService {
                     lock_time.stop();
                     timing.total_lock_time_ns += lock_time.as_ns();
                     let mut tick_time = Measure::start("tick");
-                    poh_recorder_l.tick();
+                    poh_recorder_l.tick(false);
                     tick_time.stop();
                     timing.total_tick_time_ns += tick_time.as_ns();
                 }

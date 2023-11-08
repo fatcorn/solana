@@ -155,6 +155,10 @@ impl BankForks {
         self.banks.get(&bank_slot).cloned()
     }
 
+    pub fn t_get(&self, bank_slot: Slot) -> Option<Arc<Bank>> {
+        self.t_banks.get(&bank_slot).cloned()
+    }
+
     pub fn get_mut(&mut self, bank_slot: Slot) -> Option<&mut Arc<Bank>> {
         self.banks.get_mut(&bank_slot)
     }
@@ -252,6 +256,12 @@ impl BankForks {
 
     pub fn insert_to_t_banks(&mut self, bank: Arc<Bank>) -> Arc<Bank> {
         let prev = self.t_banks.insert(bank.t_slot(), bank.clone());
+        info!("insert t slot {} to t banks", bank.t_slot());
+        // todo, for debugging, delete later, add by jesse
+        if prev.is_some() {
+            let prev = prev.clone().unwrap();
+            println!("prev info slot {}, t slot {}", prev.slot(), prev.t_slot());
+        }
         assert!(prev.is_none());
         let slot = bank.t_slot();
         self.t_descendants.entry(slot).or_default();

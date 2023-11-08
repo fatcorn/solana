@@ -46,6 +46,7 @@ pub enum Error {
 }
 
 #[allow(clippy::large_enum_variant)]
+#[derive(Debug)]
 enum NodeId {
     // TVU node obtained through gossip (staked or not).
     ContactInfo(ContactInfo),
@@ -53,6 +54,7 @@ enum NodeId {
     Pubkey(Pubkey),
 }
 
+#[derive(Debug)]
 pub struct Node {
     node: NodeId,
     stake: u64,
@@ -213,6 +215,7 @@ impl ClusterNodes<RetransmitStage> {
                 }
             })
             .collect();
+        info!("retransmit nodes {:?}", nodes);
         let self_index = nodes
             .iter()
             .position(|node| node.pubkey() == self.pubkey)

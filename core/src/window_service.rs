@@ -327,6 +327,7 @@ impl WindowService {
 
         let cluster_info = repair_info.cluster_info.clone();
 
+        // todo, repair service support for the t slot,add the repair handle in validator.rs, add by jesse
         let repair_service = RepairService::new(
             blockstore.clone(),
             exit.clone(),

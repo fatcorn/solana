@@ -936,6 +936,26 @@ impl Blockstore {
             } else {
                 ShredSource::Turbine
             };
+            info!(
+                "Ready to insert shred index {}\
+                 in slot {},\
+                 is t slot {},\
+                 t slot {},\
+                  shred type{:?},\
+                   shred source{:?},\
+                   last in slot {},\
+                   last in data {},\
+                   parent {:?}",
+                shred.index(),
+                shred.slot(),
+                !shred.is_virtual(),
+                shred.t_slot(),
+                shred.shred_type(),
+                shred_source,
+                shred.last_in_slot(),
+                shred.data_complete(),
+                shred.parent()
+            );
             match shred.shred_type() {
                 ShredType::Data => {
                     let is_virtual = shred.is_virtual();
@@ -1024,6 +1044,7 @@ impl Blockstore {
                 .iter()
                 .filter(|shred| shred.is_data())
                 .count();
+            // TODO, check the recovered_shreds will influenced by t_slot, add by jesse
             let recovered_shreds: Vec<_> = recovered_shreds
                 .into_iter()
                 .filter_map(|shred| {
@@ -1534,6 +1555,10 @@ impl Blockstore {
         );
 
         let slot_meta = &mut slot_meta_entry.new_slot_meta.borrow_mut();
+
+        if !is_virtual {
+            info!("t slot meta info {:?}", slot_meta);
+        }
 
         if !is_trusted {
             if Self::is_data_shred_present(&shred, slot_meta, index_meta.data()) {
@@ -3301,6 +3326,10 @@ impl Blockstore {
             self.t_meta_cf.multi_get(slots.to_vec()).into_iter().collect()
         };
 
+        if !is_virtual {
+            info!("current slot meta ret {:?}", slot_metas);
+        }
+
         let slot_metas = slot_metas?;
 
         let result: HashMap<Slot, Vec<Slot>> = slots
@@ -3450,6 +3479,7 @@ impl Blockstore {
         slots: Vec<(Slot, Option<Hash>)>,
         with_hash: bool,
     ) -> Result<()> {
+        // todo,check, is t slot needed, add by jesse
         self.set_roots(slots.iter().map(|(slot, _hash)| slot))?;
         if with_hash {
             self.set_duplicate_confirmed_slots_and_hashes(
@@ -4356,13 +4386,15 @@ pub fn create_new_ledger(
     )?;
     let ticks_per_slot = genesis_config.ticks_per_slot;
     let hashes_per_tick = genesis_config.poh_config.hashes_per_tick.unwrap_or(0);
+    // todo, check,
     let entries = create_ticks(ticks_per_slot, hashes_per_tick, genesis_config.hash());
     let last_hash = entries.last().unwrap().hash;
     let version = solana_sdk::shred_version::version_from_hash(&last_hash);
     // TODO, Since virtual slot not input, truly slot too. need to check add by jesse
     let shredder = Shredder::new(0, 0, 0, version,0, 0).unwrap();
+    let block_sign_keypair =  Keypair::new();
     let (shreds, _) = shredder.entries_to_shreds(
-        &Keypair::new(),
+        &block_sign_keypair,
         &entries,
         true, // is_last_in_slot
         0,    // next_shred_index
@@ -4372,9 +4404,23 @@ pub fn create_new_ledger(
         &mut ProcessShredsStats::default(),
         true,
     );
+    // todo, create t slot shreds to genisis, check the entries is same with v slot ok? add by jesse
+    let (t_shreds, _) = shredder.entries_to_shreds(
+        &block_sign_keypair,
+        &entries,
+        true, // is_last_in_slot
+        0,    // next_shred_index
+        0,    // next_code_index
+        true, // merkle_variant
+        &ReedSolomonCache::default(),
+        &mut ProcessShredsStats::default(),
+        false,
+    );
     assert!(shreds.last().unwrap().last_in_slot());
 
     blockstore.insert_shreds(shreds, None, false)?;
+    blockstore.insert_shreds(t_shreds, None, false)?;
+    // todo, check, is t slot root needed, add by jesse
     blockstore.set_roots(std::iter::once(&0))?;
     // Explicitly close the blockstore before we create the archived genesis file
     drop(blockstore);

@@ -430,7 +430,7 @@ fn check_slots_are_valid(
     t_vote_hash: &Option<Hash>,
 ) -> Result<(), VoteError> {
     // index into the vote's slots, starting at the oldest
-    // slot
+    // slot/
     let mut i = 0;
 
     // index into the slot_hashes, starting at the oldest known

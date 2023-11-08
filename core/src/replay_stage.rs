@@ -2658,8 +2658,8 @@ impl ReplayStage {
         log_messages_bytes_limit: Option<usize>,
         bank_slot: Slot,
         prioritization_fee_cache: &PrioritizationFeeCache,
+        is_virtual: bool,
     ) -> ReplaySlotFromBlockstore {
-        let is_virtual = true;
         let mut replay_result = ReplaySlotFromBlockstore {
             is_slot_dead: false,
             bank_slot,
@@ -2672,9 +2672,16 @@ impl ReplayStage {
             debug!("bank_slot {:?} is marked dead", bank_slot);
             replay_result.is_slot_dead = true;
         } else {
-            let bank = &bank_forks.read().unwrap().get(bank_slot).unwrap();
+            // todo, check, t_banks in bank_forks is need or in this place input the bank t slot is need? add by jesse,
+            let bank =  if is_virtual {
+                bank_forks.read().unwrap().get(bank_slot).unwrap()
+            } else {
+                bank_forks.read().unwrap().t_get(bank_slot).unwrap()
+            };
+            //todo, check, only use v slot in progress and forks info, so this place fix replay result to bank_slot.
+            replay_result.bank_slot = bank.slot();
             let parent_slot = bank.parent_slot();
-            let prev_leader_slot = progress.get_bank_prev_leader_slot(bank);
+            let prev_leader_slot = progress.get_bank_prev_leader_slot(&bank);
             let (num_blocks_on_fork, num_dropped_blocks_on_fork) = {
                 let stats = progress
                     .get(&parent_slot)
@@ -2688,7 +2695,7 @@ impl ReplayStage {
             // progress only use the v_slot as the key, add by jesse
             let bank_progress = progress.entry(bank.slot()).or_insert_with(|| {
                 ForkProgress::new_from_bank(
-                    bank,
+                    &bank,
                     my_pubkey,
                     &vote_account.clone(),
                     prev_leader_slot,
@@ -2710,7 +2717,7 @@ impl ReplayStage {
             if bank.collector_id() != my_pubkey {
                 let mut replay_blockstore_time = Measure::start("replay_blockstore_into_bank");
                 let blockstore_result = Self::replay_blockstore_into_bank(
-                    bank,
+                    &bank,
                     blockstore,
                     &bank_progress.replay_stats,
                     replay_progress,
@@ -2764,7 +2771,9 @@ impl ReplayStage {
             }
 
             let bank_slot = replay_result.bank_slot;
+            info!("the bank slot is {}", bank_slot);
             let bank = &bank_forks.read().unwrap().get(bank_slot).unwrap();
+
             if let Some(replay_result) = &replay_result.replay_result {
                 match replay_result {
                     Ok(replay_tx_count) => tx_count += replay_tx_count,
@@ -2793,11 +2802,16 @@ impl ReplayStage {
             }
 
             assert_eq!(bank_slot, bank.slot());
-            if bank.is_complete() {
+            let bank_progress = progress
+                .get_mut(&bank.slot())
+                .expect("Bank fork progress entry missing for completed bank");
+            let t_replay_progress = bank_progress.t_replay_progress.read().unwrap();
+            // add new bank frozen condition
+            info!("ready to check the bank is complete");
+            if bank.is_complete() && ( !bank.t_frozen_flag_from_v_entry() ||
+                (bank.t_frozen_flag_from_v_entry() && t_replay_progress.t_slot_consumed_over)) {
                 let mut bank_complete_time = Measure::start("bank_complete_time");
-                let bank_progress = progress
-                    .get_mut(&bank.slot())
-                    .expect("Bank fork progress entry missing for completed bank");
+
 
                 let replay_stats = bank_progress.replay_stats.clone();
                 let r_replay_stats = replay_stats.read().unwrap();
@@ -2862,7 +2876,7 @@ impl ReplayStage {
                         .send(BankNotification::Frozen(bank.clone()))
                         .unwrap_or_else(|err| warn!("bank_notification_sender failed: {:?}", err));
                 }
-                blockstore_processor::cache_block_meta(bank, cache_block_meta_sender);
+                blockstore_processor::cache_block_meta(&bank, cache_block_meta_sender);
 
                 let bank_hash = bank.hash();
                 if let Some(new_frozen_voters) =
@@ -2909,6 +2923,7 @@ impl ReplayStage {
                     bank.max_tick_height()
                 );
             }
+            info!("after check the bank is complete");
         }
 
         did_complete_bank
@@ -2990,6 +3005,7 @@ impl ReplayStage {
                             log_messages_bytes_limit,
                             *bank_slot,
                             prioritization_fee_cache,
+                            is_virtual
                         )
                     })
                     .collect()
@@ -3814,6 +3830,10 @@ impl ReplayStage {
 
         let frozen_banks = forks.frozen_banks();
         let t_frozen_banks = forks.t_frozen_banks();
+        // info!("frozen_banks {:?} ", frozen_banks);
+        // info!("t_frozen_banks {:?} ", t_frozen_banks);
+        // todo, check, is there a problem that v slot shreds receive over,
+        // todo, but t slot is still in receive, so t slot will execute in next around, add by jesse
         let frozen_bank_slots: Vec<u64> = frozen_banks
             .keys()
             .cloned()
@@ -3825,6 +3845,9 @@ impl ReplayStage {
             .filter(|s| *s >= forks.t_root())
             .collect();
 
+        info!("frozen_bank_slots {:?} ", frozen_bank_slots);
+        info!("t_frozen_bank_slots {:?} ", t_frozen_bank_slots);
+
         let mut generate_new_bank_forks_get_slots_since =
             Measure::start("generate_new_bank_forks_get_slots_since");
         let next_slots = blockstore
@@ -3834,6 +3857,9 @@ impl ReplayStage {
             .get_slots_since(&t_frozen_bank_slots, false)
             .expect("Db error");
         generate_new_bank_forks_get_slots_since.stop();
+
+        info!("next_slots {:?} ", next_slots);
+        info!("t_next_slots {:?} ", t_next_slots);
 
         // Filter out what we've already seen
         trace!("generate new forks {:?}", {
@@ -3885,23 +3911,30 @@ impl ReplayStage {
         // update the v_bank and get t_bank
         let mut t_bank_linked_bank_slots = vec![];
         for (t_parent_slot, t_children) in t_next_slots {
+            info!("enter t bank add.");
             let parent_bank = t_frozen_banks
                 .get(&t_parent_slot)
                 .expect("missing parent in bank forks")
                 .clone();
+
             let t_slots_with_linked_slot = blockstore.get_t_slots_with_linked_slots(&t_children).expect("Get t_slot failed");
             for (t_slot, linked_slot) in t_slots_with_linked_slot {
+                if forks.t_get(t_slot).is_some() {
+                    trace!("child already active or frozen {}", t_slot);
+                    continue;
+                }
                 let mut v_bank = new_banks.get(&linked_slot);
                 if v_bank.is_none() {
-                    let mut w_forks = bank_forks.write().unwrap();
-                    let inner_v_bank = w_forks.get(linked_slot);
+                    let mut r_forks = bank_forks.read().unwrap();
+                    let inner_v_bank = r_forks.get(linked_slot);
                     if inner_v_bank.is_none() {
+                        error!("t bank {} not find related v bank {}", t_slot, linked_slot);
                         continue;
                     }
                     let inner_v_bank = inner_v_bank.unwrap();
                     inner_v_bank.update_t_slot_related(t_slot, t_parent_slot, parent_bank.clone());
                     t_bank_linked_bank_slots.push(linked_slot);
-                    drop(w_forks);
+                    drop(r_forks);
                 } else {
                     let v_bank = v_bank.unwrap();
                     v_bank.update_t_slot_related(t_slot, t_parent_slot, parent_bank.clone());
@@ -3909,6 +3942,7 @@ impl ReplayStage {
                 }
             }
         }
+        info!("finish t bank add.");
 
         drop(forks);
         generate_new_bank_forks_loop.stop();
