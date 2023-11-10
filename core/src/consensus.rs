@@ -586,7 +586,7 @@ impl Tower {
         trace!("{} record_vote for {}", self.node_pubkey, vote_slot);
         let old_root = self.root();
 
-        let t_old_root = self.root();
+        let t_old_root = self.t_root();
 
         let mut new_vote = if is_direct_vote_state_update_enabled {
             warn!("new_vote in is_direct_vote_state_update_enabled");
@@ -614,17 +614,20 @@ impl Tower {
             )
         };
 
+        warn!("Generate new vote {:?} tx", new_vote);
+
         new_vote.set_timestamp(self.maybe_timestamp(self.last_voted_slot().unwrap_or_default()));
         self.last_vote = new_vote;
 
         let new_root = self.root();
 
-        let t_new_root = self.root();
+        let t_new_root = self.t_root();
 
         datapoint_info!(
             "tower-vote",
             ("latest", vote_slot, i64),
-            ("root", new_root, i64)
+            ("root", new_root, i64),
+            ("t_root", t_new_root, i64)
         );
         let new_root = if old_root != new_root {
             Some(new_root)

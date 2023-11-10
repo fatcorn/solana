@@ -251,7 +251,6 @@ impl SlotMeta {
                 )
             );
         }
-
         Some(self.consumed) == self.last_index.map(|ix| ix + 1)
     }
 

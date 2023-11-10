@@ -89,6 +89,7 @@ use {
         time::{Duration, Instant},
     },
 };
+use solana_accounts_db::contains::Contains;
 
 pub const MAX_ENTRY_RECV_PER_ITER: usize = 512;
 pub const SUPERMINORITY_THRESHOLD: f64 = 1f64 / 3f64;
@@ -2165,6 +2166,32 @@ impl ReplayStage {
             blockstore
                 .set_roots(rooted_slots.iter())
                 .expect("Ledger set roots failed");
+            // todo, check,in v new_root update the t new root is ok, is need sperate t new root same with new_v_root,
+            // todo and, check, this_place not use t_new_root for now, cause, if v new root update,the t_new_root,may not generate
+            if bank.is_include_t_slot() {
+
+                let t_rooted_banks = root_bank.t_parents();
+                let mut t_rooted_slots: Vec<_> = t_rooted_banks.iter().map(|bank| bank.t_slot()).collect();
+                // todo, temply use the way delete repeat to make t roots save correctly, if wanna logic correct, may fix the t_parent in bank rc t_parents save logic, add by jesse
+                t_rooted_slots.sort();
+                let mut last_slot = None;
+                debug!("t_rooted_slots {:?} ready to t slots {:?}", t_rooted_slots, t_new_root);
+                t_rooted_slots.retain(|x| {
+                    if last_slot.is_none() {
+                        last_slot = Some(*x);
+                        return true;
+                    }
+                    if Some(*x) == last_slot {
+                        last_slot = Some(*x);
+                        return false;
+                    }
+                    true
+                });
+                debug!("t_rooted_slots delete repeat {:?} ready to t slots {:?}", t_rooted_slots, t_new_root);
+                blockstore
+                    .set_t_roots(t_rooted_slots.iter())
+                    .expect("Ledger set roots failed");
+            }
             let highest_super_majority_root = Some(
                 block_commitment_cache
                     .read()
@@ -2714,7 +2741,7 @@ impl ReplayStage {
             } else {
                 &bank_progress.t_replay_progress
             };
-            if bank.collector_id() != my_pubkey {
+            if bank.collector_id() != my_pubkey && !replay_progress.read().unwrap().v_slot_consumed_over {
                 let mut replay_blockstore_time = Measure::start("replay_blockstore_into_bank");
                 let blockstore_result = Self::replay_blockstore_into_bank(
                     &bank,
@@ -2809,7 +2836,7 @@ impl ReplayStage {
             // add new bank frozen condition
             info!("ready to check the bank is complete");
             if bank.is_complete() && ( !bank.t_frozen_flag_from_v_entry() ||
-                (bank.t_frozen_flag_from_v_entry() && t_replay_progress.t_slot_consumed_over)) {
+                (bank.t_frozen_flag_from_v_entry() && t_replay_progress.t_slot_consumed_over)) && !bank.is_frozen() {
                 let mut bank_complete_time = Measure::start("bank_complete_time");
 
 

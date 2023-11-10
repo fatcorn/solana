@@ -1583,15 +1583,16 @@ impl Blockstore {
                     write_batch.put::<cf::TDeadSlots>(slot, &true).unwrap();
                 };
             }
-
+            let last_root = if is_virtual { &self.last_root } else { &self.t_last_root };
             if !self.should_insert_data_shred(
                 &shred,
                 slot_meta,
                 just_inserted_shreds,
-                &self.last_root,
+                last_root,
                 leader_schedule,
                 shred_source,
             ) {
+                info!("This shred {} is a InvalidShred, slot {}, linked slot {}", shred.index(), slot_meta.slot, slot_meta.linked_slot);
                 return Err(InsertDataShredError::InvalidShred);
             }
         }
@@ -1770,6 +1771,9 @@ impl Blockstore {
         let last_root = *last_root.read().unwrap();
         // TODO Shouldn't this use shred.parent() instead and update
         // slot_meta.parent_slot accordingly?
+        //todo delete, add by jesse
+        let slot_parent = slot_meta.parent_slot.clone().unwrap();
+        info!("verify_shred_slots {}, input info {:?}", verify_shred_slots(slot, slot_parent, last_root), (slot, slot_parent, last_root));
         slot_meta
             .parent_slot
             .map(|parent_slot| verify_shred_slots(slot, parent_slot, last_root))
@@ -3091,6 +3095,7 @@ impl Blockstore {
         if self.is_dead(slot, is_virtual) && !allow_dead_slots {
             return Err(BlockstoreError::DeadSlot);
         } else if completed_ranges.is_empty() {
+            debug!("Get empty completed_ranges for {}", slot);
             return Ok((vec![], 0, false));
         }
 
@@ -3124,6 +3129,8 @@ impl Blockstore {
             })
         };
         let entries: Vec<Entry> = entries?.into_iter().flatten().collect();
+        debug!("slot_meta.consumed {}, slot_meta.last_index {:?}, v slot {}, t slot {}, input slot {}, is full {}",
+            slot_meta.consumed, slot_meta.last_index, slot_meta.slot, slot_meta.linked_slot, slot, slot_meta.is_full());
         Ok((entries, num_shreds, slot_meta.is_full()))
     }
 
@@ -3466,6 +3473,24 @@ impl Blockstore {
             *last_root = 0;
         }
         *last_root = cmp::max(max_new_rooted_slot, *last_root);
+        Ok(())
+    }
+
+    pub fn set_t_roots<'a>(&self, t_rooted_slots: impl Iterator<Item = &'a Slot>) -> Result<()> {
+        let mut write_batch = self.db.batch()?;
+        let mut max_new_rooted_slot = 0;
+        for slot in t_rooted_slots {
+            max_new_rooted_slot = std::cmp::max(max_new_rooted_slot, *slot);
+            write_batch.put::<cf::TRoot>(*slot, &true)?;
+        }
+
+        self.db.write(write_batch)?;
+
+        let mut t_last_root = self.t_last_root.write().unwrap();
+        if *t_last_root == std::u64::MAX {
+            *t_last_root = 0;
+        }
+        *t_last_root = cmp::max(max_new_rooted_slot, *t_last_root);
         Ok(())
     }
 

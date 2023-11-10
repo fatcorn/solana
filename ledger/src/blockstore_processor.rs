@@ -1064,6 +1064,8 @@ pub struct ConfirmationProgress {
     // pub t_num_entries: usize,
     // pub t_num_txs: usize,
     pub t_slot_consumed_over: bool,
+    // To fix, generated InvalidLastTick error if the v slot consumed_over, and replay again.
+    pub v_slot_consumed_over: bool,
 }
 
 impl ConfirmationProgress {
@@ -1326,6 +1328,11 @@ fn confirm_slot_entries(
 
     if let Some(last_entry_hash) = last_entry_hash {
         progress.last_entry = last_entry_hash;
+    }
+
+    if is_virtual && slot_full {
+        // todo, check, use this method is ok? add by jesse.
+        progress.v_slot_consumed_over = true;
     }
 
     Ok(())

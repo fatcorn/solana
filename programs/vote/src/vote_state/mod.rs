@@ -547,7 +547,11 @@ fn check_slots_are_valid(
         inc_new_counter_info!("dropped-vote-hash", 1);
         return Err(VoteError::SlotHashMismatch);
     }
-    if t < t_slot_hashes.len() && t_slot_hashes[t].1 != t_vote_hash.expect("t vote hash should exist") {
+    // todo, check! check! the condition t_vote_hash.is_some() added for temply solve the
+    // todo issue(Vote(Vote { slots: [114, 115], t_slots: [Some(8), None], t_hash: None, input old t_slot, but current slot is not t_slot,
+    // todo, so the t_vote_hash is None, it will lead the panic), check is need input the t parent hash in vote generate,now, the t slot was
+    // todo, multi confirm but not support for multi check.
+    if t_vote_hash.is_some() && t < t_slot_hashes.len() && t_slot_hashes[t].1 != t_vote_hash.expect("t vote hash should exist") {
         // This means the newest  t slot in the `vote_slots` has a match that
         // doesn't match the expected hash for that slot on this
         // fork
