@@ -256,11 +256,11 @@ impl BankForks {
 
     pub fn insert_to_t_banks(&mut self, bank: Arc<Bank>) -> Arc<Bank> {
         let prev = self.t_banks.insert(bank.t_slot(), bank.clone());
-        info!("insert t slot {} to t banks", bank.t_slot());
+        debug!("insert t slot {} to t banks", bank.t_slot());
         // todo, for debugging, delete later, add by jesse
         if prev.is_some() {
             let prev = prev.clone().unwrap();
-            println!("prev info slot {}, t slot {}", prev.slot(), prev.t_slot());
+            debug!("prev info slot {}, t slot {}", prev.slot(), prev.t_slot());
         }
         assert!(prev.is_none());
         let slot = bank.t_slot();

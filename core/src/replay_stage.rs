@@ -2798,7 +2798,7 @@ impl ReplayStage {
             }
 
             let bank_slot = replay_result.bank_slot;
-            info!("the bank slot is {}", bank_slot);
+            debug!("the bank slot is {}", bank_slot);
             let bank = &bank_forks.read().unwrap().get(bank_slot).unwrap();
 
             if let Some(replay_result) = &replay_result.replay_result {
@@ -2834,7 +2834,7 @@ impl ReplayStage {
                 .expect("Bank fork progress entry missing for completed bank");
             let t_replay_progress = bank_progress.t_replay_progress.read().unwrap();
             // add new bank frozen condition
-            info!("ready to check the bank is complete");
+            debug!("ready to check the bank is complete");
             if bank.is_complete() && ( !bank.t_frozen_flag_from_v_entry() ||
                 (bank.t_frozen_flag_from_v_entry() && t_replay_progress.t_slot_consumed_over)) && !bank.is_frozen() {
                 let mut bank_complete_time = Measure::start("bank_complete_time");
@@ -2950,7 +2950,6 @@ impl ReplayStage {
                     bank.max_tick_height()
                 );
             }
-            info!("after check the bank is complete");
         }
 
         did_complete_bank
@@ -3233,12 +3232,13 @@ impl ReplayStage {
                 .expect("All frozen banks must exist in the Progress map");
 
             stats.vote_threshold =
-                tower.check_vote_stake_threshold(bank_slot, &stats.voted_stakes, stats.total_stake, bank_t_slot);
+                tower.check_vote_stake_threshold(bank_slot, &stats.voted_stakes, stats.total_stake, bank_t_slot.clone());
             stats.is_locked_out = tower.is_locked_out(
                 bank_slot,
                 ancestors
                     .get(&bank_slot)
                     .expect("Ancestors map should contain slot for is_locked_out() check"),
+                bank_t_slot
             );
             stats.has_voted = tower.has_voted(bank_slot);
             stats.is_recent = tower.is_recent(bank_slot);
@@ -3872,8 +3872,8 @@ impl ReplayStage {
             .filter(|s| *s >= forks.t_root())
             .collect();
 
-        info!("frozen_bank_slots {:?} ", frozen_bank_slots);
-        info!("t_frozen_bank_slots {:?} ", t_frozen_bank_slots);
+        debug!("frozen_bank_slots {:?} ", frozen_bank_slots);
+        debug!("t_frozen_bank_slots {:?} ", t_frozen_bank_slots);
 
         let mut generate_new_bank_forks_get_slots_since =
             Measure::start("generate_new_bank_forks_get_slots_since");
@@ -3885,8 +3885,8 @@ impl ReplayStage {
             .expect("Db error");
         generate_new_bank_forks_get_slots_since.stop();
 
-        info!("next_slots {:?} ", next_slots);
-        info!("t_next_slots {:?} ", t_next_slots);
+        debug!("next_slots {:?} ", next_slots);
+        debug!("t_next_slots {:?} ", t_next_slots);
 
         // Filter out what we've already seen
         trace!("generate new forks {:?}", {
@@ -3938,7 +3938,7 @@ impl ReplayStage {
         // update the v_bank and get t_bank
         let mut t_bank_linked_bank_slots = vec![];
         for (t_parent_slot, t_children) in t_next_slots {
-            info!("enter t bank add.");
+            debug!("enter t bank add.");
             let parent_bank = t_frozen_banks
                 .get(&t_parent_slot)
                 .expect("missing parent in bank forks")
@@ -3969,7 +3969,7 @@ impl ReplayStage {
                 }
             }
         }
-        info!("finish t bank add.");
+        debug!("finish t bank add.");
 
         drop(forks);
         generate_new_bank_forks_loop.stop();

@@ -456,7 +456,7 @@ pub fn broadcast_shreds(
                     .ok()
                     .filter(|addr| socket_addr_space.check(addr))
                     .map(|addr| {
-                        info!(
+                        debug!(
                             "broadcast slot {}, t slot {}, index {} to {:?},\
                              is t slot {}, shred type {:?}, last in slot {}, last in data {}",
                             shred.slot(),

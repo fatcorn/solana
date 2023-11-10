@@ -215,7 +215,7 @@ impl ClusterNodes<RetransmitStage> {
                 }
             })
             .collect();
-        info!("retransmit nodes {:?}", nodes);
+        debug!("retransmit nodes {:?}", nodes);
         let self_index = nodes
             .iter()
             .position(|node| node.pubkey() == self.pubkey)

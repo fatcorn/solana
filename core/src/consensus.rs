@@ -738,8 +738,9 @@ impl Tower {
         false
     }
 
-    pub fn is_locked_out(&self, slot: Slot, ancestors: &HashSet<Slot>) -> bool {
+    pub fn is_locked_out(&self, slot: Slot, ancestors: &HashSet<Slot>, t_slot: Option<Slot>) -> bool {
         if !self.is_recent(slot) {
+            info!("the slot {}, t slot {:?} is not recent, will set locked out", slot, t_slot);
             return true;
         }
 
@@ -749,9 +750,10 @@ impl Tower {
         // it's still locked out.
         let mut vote_state = self.vote_state.clone();
         // todo,check input valid args, may should input t_ancestors add by jesse
-        process_slot_vote_unchecked(&mut vote_state, slot, None);
+        process_slot_vote_unchecked(&mut vote_state, slot, t_slot);
         for vote in &vote_state.votes {
             if slot != vote.slot() && !ancestors.contains(&vote.slot()) {
+                info!("the slot {}, t slot {:?} is not in vote state votes, will set locked out", slot, t_slot);
                 return true;
             }
         }
