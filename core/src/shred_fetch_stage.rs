@@ -57,6 +57,7 @@ impl ShredFetchStage {
         let mut last_root = 0;
         let mut last_slot = std::u64::MAX;
         let mut slots_per_epoch = 0;
+        let mut last_t_root = 0;
 
         let mut stats = ShredFetchStats::default();
 
@@ -66,6 +67,7 @@ impl ShredFetchStage {
                 {
                     let bank_forks_r = bank_forks.read().unwrap();
                     last_root = bank_forks_r.root();
+                    last_t_root = bank_forks_r.t_root();
                     let working_bank = bank_forks_r.working_bank();
                     last_slot = working_bank.slot();
                     root_bank = bank_forks_r.root_bank();
@@ -104,6 +106,7 @@ impl ShredFetchStage {
                         shred_version,
                         should_drop_merkle_shreds,
                         &mut stats,
+                        last_t_root
                     )
                 {
                     packet.meta_mut().set_discard(true);

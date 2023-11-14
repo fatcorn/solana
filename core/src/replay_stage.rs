@@ -2175,7 +2175,7 @@ impl ReplayStage {
                 // todo, temply use the way delete repeat to make t roots save correctly, if wanna logic correct, may fix the t_parent in bank rc t_parents save logic, add by jesse
                 t_rooted_slots.sort();
                 let mut last_slot = None;
-                debug!("t_rooted_slots {:?} ready to t slots {:?}", t_rooted_slots, t_new_root);
+                info!("t_rooted_slots {:?} ready to t slots {:?}", t_rooted_slots, t_new_root);
                 t_rooted_slots.retain(|x| {
                     if last_slot.is_none() {
                         last_slot = Some(*x);
@@ -2187,7 +2187,7 @@ impl ReplayStage {
                     }
                     true
                 });
-                debug!("t_rooted_slots delete repeat {:?} ready to t slots {:?}", t_rooted_slots, t_new_root);
+                info!("t_rooted_slots delete repeat {:?} ready to t slots {:?}", t_rooted_slots, t_new_root);
                 blockstore
                     .set_t_roots(t_rooted_slots.iter())
                     .expect("Ledger set roots failed");
@@ -3872,8 +3872,8 @@ impl ReplayStage {
             .filter(|s| *s >= forks.t_root())
             .collect();
 
-        debug!("frozen_bank_slots {:?} ", frozen_bank_slots);
-        debug!("t_frozen_bank_slots {:?} ", t_frozen_bank_slots);
+        info!("frozen_bank_slots {:?} ", frozen_bank_slots);
+        info!("t_frozen_bank_slots {:?} ", t_frozen_bank_slots);
 
         let mut generate_new_bank_forks_get_slots_since =
             Measure::start("generate_new_bank_forks_get_slots_since");
@@ -3885,8 +3885,8 @@ impl ReplayStage {
             .expect("Db error");
         generate_new_bank_forks_get_slots_since.stop();
 
-        debug!("next_slots {:?} ", next_slots);
-        debug!("t_next_slots {:?} ", t_next_slots);
+        info!("next_slots {:?} ", next_slots);
+        info!("t_next_slots {:?} ", t_next_slots);
 
         // Filter out what we've already seen
         trace!("generate new forks {:?}", {

@@ -32,23 +32,29 @@ pub fn verify_shred_cpu(
     slot_leaders: &HashMap<Slot, /*pubkey:*/ [u8; 32]>,
 ) -> bool {
     if packet.meta().discard() {
+        info!("verify_shred_cpu ignore discard");
         return false;
     }
     let Some(shred) = shred::layout::get_shred(packet) else {
+        info!("verify_shred_cpu ignore get_shred");
         return false;
     };
     let Some(slot) = shred::layout::get_slot(shred) else {
+        info!("verify_shred_cpu ignore get_slot");
         return false;
     };
     trace!("slot {}", slot);
     let Some(pubkey) = slot_leaders.get(&slot) else {
+        info!("verify_shred_cpu ignore get slot_leaders slot {}", slot);
         return false;
     };
     let Some(signature) = shred::layout::get_signature(shred) else {
+        info!("verify_shred_cpu ignore get get_signature slot {}", slot);
         return false;
     };
     trace!("signature {}", signature);
     let Some(data) = shred::layout::get_signed_data(shred) else {
+        info!("verify_shred_cpu ignore get get_signed_data slot {}", slot);
         return false;
     };
     signature.verify(pubkey, data.as_ref())

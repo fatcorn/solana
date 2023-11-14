@@ -3912,9 +3912,9 @@ impl Bank {
             *hash = self.hash_internal_state(true);
             self.rc.accounts.accounts_db.mark_slot_frozen(self.slot());
         }
-        if self.is_include_t_slot() {
-            let mut hash = self.t_hash.write().unwrap();
-            *hash = self.hash_internal_state(false);
+        let mut t_hash = self.t_hash.write().unwrap();
+        if self.is_include_t_slot() && *t_hash == Hash::default() {
+            *t_hash = self.hash_internal_state(false);
         }
     }
 

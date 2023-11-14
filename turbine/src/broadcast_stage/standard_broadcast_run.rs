@@ -655,7 +655,8 @@ impl BroadcastRun for StandardBroadcastRun {
 
 fn should_use_merkle_variant(slot: Slot, cluster_type: ClusterType) -> bool {
     match cluster_type {
-        ClusterType::Testnet | ClusterType::Devnet | ClusterType::Development => true,
+        //todo, fix the merkle hash shred transmit err, add by jesse
+        ClusterType::Testnet | ClusterType::Devnet | ClusterType::Development => false,
         ClusterType::MainnetBeta => (slot % 19) < 10,
     }
 }

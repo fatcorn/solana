@@ -95,6 +95,7 @@ pub const SIZE_OF_NONCE: usize = std::mem::size_of::<Nonce>();
 /// `test_shred_constants` ensures that the values are correct.
 /// Constants are used over lazy_static for performance reasons.
 // Since add t_slot in shred common header, the headers of shred const should add 9, add by jesse
+// include ShredData length
 const SIZE_OF_COMMON_SHRED_HEADER: usize = 92;
 const SIZE_OF_DATA_SHRED_HEADERS: usize = 97;
 const SIZE_OF_CODING_SHRED_HEADERS: usize = 98;
@@ -102,12 +103,18 @@ const SIZE_OF_SIGNATURE: usize = SIGNATURE_BYTES;
 const SIZE_OF_SHRED_VARIANT: usize = 1;
 const SIZE_OF_SHRED_SLOT: usize = 8;
 
+const SIZE_OF_T_SHRED_SLOT: usize = 8;
+
 const SIZE_OF_SHRED_IS_VIRTUAL: usize = 1;
 
 const OFFSET_OF_SHRED_VARIANT: usize = SIZE_OF_SIGNATURE;
 const OFFSET_OF_SHRED_SLOT: usize = SIZE_OF_SIGNATURE + SIZE_OF_SHRED_VARIANT;
 const OFFSET_OF_SHRED_INDEX: usize = OFFSET_OF_SHRED_SLOT + SIZE_OF_SHRED_SLOT;
 const OFFSET_OF_SHRED_IS_VIRTUAL: usize = SIZE_OF_COMMON_SHRED_HEADER - SIZE_OF_SHRED_IS_VIRTUAL;
+
+const OFFSET_OF_SHRED_T_SLOT: usize = SIZE_OF_COMMON_SHRED_HEADER - SIZE_OF_SHRED_IS_VIRTUAL - SIZE_OF_T_SHRED_SLOT;
+
+const OFFSET_OF_SHRED_PARENT_OFFSET: usize = SIZE_OF_COMMON_SHRED_HEADER;
 
 // Shreds are uniformly split into erasure batches with a "target" number of
 // data shreds per each batch as below. The actual number of data shreds in
@@ -658,6 +665,13 @@ pub mod layout {
     }
 
     #[inline]
+    pub fn get_t_slot(shred: &[u8]) -> Option<Slot> {
+        <[u8; 8]>::try_from(shred.get(OFFSET_OF_SHRED_T_SLOT..)?.get(..8)?)
+            .map(Slot::from_le_bytes)
+            .ok()
+    }
+
+    #[inline]
     pub fn get_is_virtual(shred: &[u8]) -> Option<bool> {
        let byte : [u8; 1] = <[u8; 1]>::try_from(shred.get(OFFSET_OF_SHRED_IS_VIRTUAL..)?.get(..1)?).map(|x| x).ok()?;
         match byte[0] {
@@ -683,7 +697,7 @@ pub mod layout {
     // The caller should verify first that the shred is data and not code!
     pub(super) fn get_parent_offset(shred: &[u8]) -> Option<u16> {
         debug_assert_eq!(get_shred_type(shred).unwrap(), ShredType::Data);
-        <[u8; 2]>::try_from(shred.get(83..85)?)
+        <[u8; 2]>::try_from(shred.get(OFFSET_OF_SHRED_PARENT_OFFSET..)?.get(..2)?)
             .map(u16::from_le_bytes)
             .ok()
     }
@@ -962,6 +976,7 @@ pub fn should_discard_shred(
     shred_version: u16,
     should_drop_merkle_shreds: impl Fn(Slot) -> bool,
     stats: &mut ShredFetchStats,
+    t_root: Slot,
 ) -> bool {
     debug_assert!(root < max_slot);
     let shred = match layout::get_shred(packet) {
@@ -1024,14 +1039,30 @@ pub fn should_discard_shred(
                 stats.bad_parent_offset += 1;
                 return true;
             };
+            let Some(is_virtual) =  layout::get_is_virtual(shred) else {
+                error!("bad_is_virtual");
+                return true;
+            };
+
+            let Some(t_slot) = layout::get_t_slot(shred) else {
+                error!("get_t_slot");
+                return true;
+            };
+            // todo, Check, get t slot and t_root for verify_shred_slots valid, add by jesse
+            let (slot, root) = if is_virtual { (slot, root) } else { (t_slot, t_root) };
+
             let Some(parent) = slot.checked_sub(Slot::from(parent_offset)) else {
+                info!("parent_offset invalid {}, slot {}, root {}", parent_offset, slot, root);
                 stats.bad_parent_offset += 1;
                 return true;
             };
+
             if !blockstore::verify_shred_slots(slot, parent, root) {
+                info!("blockstore::verify_shred_slots slot{}, parent {}, root {}, is_virtual {}", slot, parent, root, is_virtual);
                 stats.slot_out_of_range += 1;
                 return true;
             }
+
         }
     }
     match shred_variant {

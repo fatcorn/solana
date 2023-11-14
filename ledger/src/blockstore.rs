@@ -936,7 +936,7 @@ impl Blockstore {
             } else {
                 ShredSource::Turbine
             };
-            debug!(
+            info!(
                 "Ready to insert shred index {}\
                  in slot {},\
                  is t slot {},\
@@ -1556,9 +1556,9 @@ impl Blockstore {
 
         let slot_meta = &mut slot_meta_entry.new_slot_meta.borrow_mut();
 
-        // if !is_virtual {
-        //     debug!("t slot meta info {:?}", slot_meta);
-        // }
+        if !is_virtual {
+            info!("t slot meta info {:?}", slot_meta);
+        }
 
         if !is_trusted {
             if Self::is_data_shred_present(&shred, slot_meta, index_meta.data()) {

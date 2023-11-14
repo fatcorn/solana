@@ -93,7 +93,7 @@ impl Shredder {
     ) {
         // todo,delete,for debugging, add by jesse
         let parent_offset = if is_virtual { self.slot - self.parent_slot } else { self.t_slot - self.t_parent_slot };
-        debug!("----check parent_offset, slot {},\
+        info!("----check parent_offset, slot {},\
                      parent_slot{},\
                       t slot {},\
                        tp slot {}\
