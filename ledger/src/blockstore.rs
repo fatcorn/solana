@@ -3104,9 +3104,9 @@ impl Blockstore {
             .last()
             .map(|(_, end_index)| u64::from(*end_index) - start_index + 1)
             .unwrap_or(0);
-
+        //todo remove the completed_ranges.clone(), add by jesse
         let entries: Result<Vec<Vec<Entry>>> = if completed_ranges.len() <= 1 {
-            completed_ranges
+            completed_ranges.clone()
                 .into_iter()
                 .map(|(start_index, end_index)| {
                     self.get_entries_in_data_block(slot, start_index, end_index, Some(&slot_meta), is_virtual)
@@ -3114,7 +3114,7 @@ impl Blockstore {
                 .collect()
         } else {
             PAR_THREAD_POOL.install(|| {
-                completed_ranges
+                completed_ranges.clone()
                     .into_par_iter()
                     .map(|(start_index, end_index)| {
                         self.get_entries_in_data_block(
@@ -3128,6 +3128,12 @@ impl Blockstore {
                     .collect()
             })
         };
+        // todo ,delete, add by jesse
+        if entries.is_err() {
+            info!("entries load failed, completed_ranges {:?},\
+            slot {slot}, is virtual {is_virtual}, start_index {start_index}\
+            slot meta: completed_data_indexes {:?} ", completed_ranges.clone(), slot_meta.completed_data_indexes);
+        }
         let entries: Vec<Entry> = entries?.into_iter().flatten().collect();
         debug!("slot_meta.consumed {}, slot_meta.last_index {:?}, v slot {}, t slot {}, input slot {}, is full {}",
             slot_meta.consumed, slot_meta.last_index, slot_meta.slot, slot_meta.linked_slot, slot, slot_meta.is_full());
@@ -3284,7 +3290,19 @@ impl Blockstore {
                 .collect();
         let data_shreds = data_shreds?;
         let last_shred = data_shreds.last().unwrap();
-        assert!(last_shred.data_complete() || last_shred.last_in_slot());
+
+        // todo, check, may recover the assert, maybe not need, in our situaition, shred's order exits disordered, add by jesse
+        // assert!(last_shred.data_complete() || last_shred.last_in_slot());
+
+        if !last_shred.data_complete() && !last_shred.last_in_slot() {
+           return  Err(BlockstoreError::InvalidShredData(Box::new(bincode::ErrorKind::Custom(format!(
+                "The last shred is not last data, index {} in slot {}, t slot {}, is virtual{}",
+                last_shred.index(),
+                last_shred.slot(),
+                last_shred.t_slot(),
+                last_shred.is_virtual()
+            )))));
+        }
 
         let deshred_payload = Shredder::deshred(&data_shreds).map_err(|e| {
             BlockstoreError::InvalidShredData(Box::new(bincode::ErrorKind::Custom(format!(
@@ -3295,7 +3313,7 @@ impl Blockstore {
         debug!("{:?} shreds in last FEC set", data_shreds.len(),);
         bincode::deserialize::<Vec<Entry>>(&deshred_payload).map_err(|e| {
             BlockstoreError::InvalidShredData(Box::new(bincode::ErrorKind::Custom(format!(
-                "could not reconstruct entries: {e:?}"
+                "could not reconstruct entries: {e:?}, start_index {start_index:}, end_index {end_index:}"
             ))))
         })
     }

@@ -90,6 +90,7 @@ use {
     },
 };
 use solana_accounts_db::contains::Contains;
+use solana_ledger::blockstore::BlockstoreError;
 
 pub const MAX_ENTRY_RECV_PER_ITER: usize = 512;
 pub const SUPERMINORITY_THRESHOLD: f64 = 1f64 / 3f64;
@@ -1470,6 +1471,7 @@ impl ReplayStage {
         blockstore: &Blockstore,
     ) {
         warn!("purging slot {}", duplicate_slot);
+        //todo purging t bank from blockstore, add by jesse
 
         // Doesn't need to be root bank, just needs a common bank to
         // access the status cache and accounts
@@ -1992,6 +1994,11 @@ impl ReplayStage {
         let mut w_replay_stats = replay_stats.write().unwrap();
         let mut w_replay_progress = replay_progress.write().unwrap();
         let tx_count_before = w_replay_progress.num_txs;
+        // t slot consumed_over, not replay again
+        if !is_virtual && w_replay_progress.t_slot_consumed_over {
+            return Ok(0)
+        }
+
         // All errors must lead to marking the slot as dead, otherwise,
         // the `check_slot_agrees_with_cluster()` called by `replay_active_banks()`
         // will break!
@@ -2041,6 +2048,20 @@ impl ReplayStage {
             err,
             BlockstoreProcessorError::InvalidBlock(BlockError::TooFewTicks)
         );
+
+        // todo, check, ignore the InvalidShredData for now, casue last data come later offen happen, make it go on read later.
+        // todo, solve plan, depends on consensus(fork or drop, or accept), or ignore the err that we offen meet, and add the err detail,
+        // todo, ignore the err we konw and marked(add new err type), add by jesse
+        let err_can_ignore = matches!(
+            err,
+            BlockstoreProcessorError::FailedToLoadEntries(BlockstoreError::InvalidShredData(_))
+        );
+
+        if err_can_ignore {
+            warn!("Err-can-ignore {:?}", err);
+            return;
+        }
+
         let slot = bank.slot();
         if is_serious {
             datapoint_error!(
@@ -2787,6 +2808,7 @@ impl ReplayStage {
         block_metadata_notifier: Option<BlockMetadataNotifierLock>,
         replay_result_vec: &[ReplaySlotFromBlockstore],
         purge_repair_slot_counter: &mut PurgeRepairSlotCounter,
+        my_pubkey: &Pubkey,
     ) -> bool {
         // TODO: See if processing of blockstore replay results and bank completion can be made thread safe.
         let mut did_complete_bank = false;
@@ -2798,7 +2820,7 @@ impl ReplayStage {
             }
 
             let bank_slot = replay_result.bank_slot;
-            debug!("the bank slot is {}", bank_slot);
+
             let bank = &bank_forks.read().unwrap().get(bank_slot).unwrap();
 
             if let Some(replay_result) = &replay_result.replay_result {
@@ -2832,18 +2854,30 @@ impl ReplayStage {
             let bank_progress = progress
                 .get_mut(&bank.slot())
                 .expect("Bank fork progress entry missing for completed bank");
+            let v_replay_progress = bank_progress.replay_progress.read().unwrap();
             let t_replay_progress = bank_progress.t_replay_progress.read().unwrap();
             // add new bank frozen condition
             debug!("ready to check the bank is complete");
-            if bank.is_complete() && ( !bank.t_frozen_flag_from_v_entry() ||
+            info!("the bank slot is {}, include truly tx {}, bank complete {}, t slot consumed_over {}",
+                bank_slot,
+                bank.t_frozen_flag_from_v_entry(),
+                bank.is_complete(),
+                t_replay_progress.t_slot_consumed_over);
+            let is_my_bank = bank.collector_id() == my_pubkey;
+            // todo, check,leader bank v slot ticks over verify through by tick_height, flower verify by v_slot_consumed_over,   add by jesse
+            if (is_my_bank && bank.is_complete() || v_replay_progress.v_slot_consumed_over) && ( !bank.t_frozen_flag_from_v_entry() ||
                 (bank.t_frozen_flag_from_v_entry() && t_replay_progress.t_slot_consumed_over)) && !bank.is_frozen() {
                 let mut bank_complete_time = Measure::start("bank_complete_time");
 
+                // todo, check, flower register bank last tick in there, for t slot correctly consumed over(the recent block hash), add by jesse
+                if !is_my_bank {
+                    bank.register_tick(&v_replay_progress.last_entry);
+                }
 
                 let replay_stats = bank_progress.replay_stats.clone();
                 let r_replay_stats = replay_stats.read().unwrap();
-                let replay_progress = bank_progress.replay_progress.clone();
-                let r_replay_progress = replay_progress.read().unwrap();
+                // let replay_progress = bank_progress.replay_progress.clone();
+                // let r_replay_progress = replay_progress.read().unwrap();
                 debug!(
                     "bank {} has completed replay from blockstore, \
                      contribute to update cost with {:?}",
@@ -2856,6 +2890,7 @@ impl ReplayStage {
                     transaction_status_sender.send_transaction_status_freeze_message(bank);
                 }
                 bank.freeze();
+
                 datapoint_info!(
                     "bank_frozen",
                     ("slot", bank_slot, i64),
@@ -2936,9 +2971,9 @@ impl ReplayStage {
 
                 r_replay_stats.report_stats(
                     bank.slot(),
-                    r_replay_progress.num_txs,
-                    r_replay_progress.num_entries,
-                    r_replay_progress.num_shreds,
+                    v_replay_progress.num_txs,
+                    v_replay_progress.num_entries,
+                    v_replay_progress.num_shreds,
                     bank_complete_time.as_us(),
                 );
                 execute_timings.accumulate(&r_replay_stats.batch_execute.totals);
@@ -3059,6 +3094,7 @@ impl ReplayStage {
                 block_metadata_notifier,
                 &replay_result_vec,
                 purge_repair_slot_counter,
+                my_pubkey
             )
         };
         // First do t slots, and t slots may not complete a bank, todo check later, add by jesse

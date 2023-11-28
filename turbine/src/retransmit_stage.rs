@@ -39,7 +39,7 @@ use {
     },
     tokio::sync::mpsc::Sender as AsyncSender,
 };
-use solana_ledger::shred::Shred;
+use solana_ledger::shred::{Shred, ShredType};
 
 const MAX_DUPLICATE_COUNT: usize = 2;
 const DEDUPER_FALSE_POSITIVE_RATE: f64 = 0.001;
@@ -209,7 +209,8 @@ fn retransmit(
         .into_iter()
         .filter_map(|shred| {
             let key = shred::layout::get_shred_id(&shred)?;
-            if shred_deduper.dedup(key, &shred, MAX_DUPLICATE_COUNT) {
+            // todo, check add data type shred would not filter by deduper, add by jesse
+            if shred_deduper.dedup(key, &shred, MAX_DUPLICATE_COUNT) && key.shred_type() != ShredType::Data {
                 stats.num_shreds_skipped += 1;
                 None
             } else {

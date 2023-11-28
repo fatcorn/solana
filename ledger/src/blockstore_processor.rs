@@ -504,7 +504,9 @@ fn process_entries(
                         prioritization_fee_cache,
                     )?;
                     batches.clear();
-                    for hash in &tick_hashes {
+                    // todo, check carefully, for make the block last tick register in bank frozen stage(after t slot consumed over),
+                    // todo, note register the last tick, add by jesse
+                    for hash in &tick_hashes[..tick_hashes.len() - 1] {
                         bank.register_tick(hash);
                     }
                     tick_hashes.clear();
@@ -942,13 +944,15 @@ fn confirm_full_slot(
 
     timing.accumulate(&confirmation_timing.batch_execute.totals);
 
-    if !bank.is_complete() {
-        Err(BlockstoreProcessorError::InvalidBlock(
-            BlockError::Incomplete,
-        ))
-    } else {
-        Ok(())
-    }
+    // todo, check, bank_0 not check is complete,casue the last tick will register on bank frozen logic, add by jesse
+    Ok(())
+    // if !bank.is_complete() {
+    //     Err(BlockstoreProcessorError::InvalidBlock(
+    //         BlockError::Incomplete,
+    //     ))
+    // } else {
+    //     Ok(())
+    // }
 }
 
 /// Measures different parts of the slot confirmation processing pipeline.
@@ -1322,7 +1326,8 @@ fn confirm_slot_entries(
     progress.num_entries += num_entries;
     progress.num_txs += num_txs;
 
-    if !is_virtual {
+    // Set only once, if v_slot is full later, t slot shreds consumed may overflow index lead slot_full change to false
+    if !is_virtual && !progress.t_slot_consumed_over {
         progress.t_slot_consumed_over = slot_full;
     }
 
@@ -1361,6 +1366,9 @@ fn process_bank_0(
         &mut ExecuteTimings::default(),
     )
     .expect("Failed to process bank 0 from ledger. Did you forget to provide a snapshot?");
+    // todo, check, the last tick will register on bank frozen logic for flower t_slot consumed over, add by jesse
+    let last_tick_hash = progress.last_entry;
+    bank0.register_tick(&last_tick_hash);
     bank0.freeze();
     if blockstore.is_primary_access() {
         blockstore.insert_bank_hash(bank0.slot(), bank0.hash(), false);

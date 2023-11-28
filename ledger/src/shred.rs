@@ -275,6 +275,10 @@ impl ShredId {
         self.0
     }
 
+    pub fn shred_type(&self) -> ShredType {
+        self.2
+    }
+
     pub(crate) fn unpack(&self) -> (Slot, /*shred index:*/ u32, ShredType) {
         (self.0, self.1, self.2)
     }
@@ -1052,13 +1056,13 @@ pub fn should_discard_shred(
             let (slot, root) = if is_virtual { (slot, root) } else { (t_slot, t_root) };
 
             let Some(parent) = slot.checked_sub(Slot::from(parent_offset)) else {
-                info!("parent_offset invalid {}, slot {}, root {}", parent_offset, slot, root);
+                debug!("parent_offset invalid {}, slot {}, root {}", parent_offset, slot, root);
                 stats.bad_parent_offset += 1;
                 return true;
             };
 
             if !blockstore::verify_shred_slots(slot, parent, root) {
-                info!("blockstore::verify_shred_slots slot{}, parent {}, root {}, is_virtual {}", slot, parent, root, is_virtual);
+                debug!("blockstore::verify_shred_slots slot{}, parent {}, root {}, is_virtual {}", slot, parent, root, is_virtual);
                 stats.slot_out_of_range += 1;
                 return true;
             }

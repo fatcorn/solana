@@ -447,7 +447,7 @@ fn check_slots_are_valid(
     //
     // 2) Conversely, `slot_hashes` is sorted from newest/largest vote to
     // the oldest/smallest vote
-    warn!("vote_state {:?}", vote_state);
+    debug!("vote_state {:?}", vote_state);
     while i < vote_slots.len() && j > 0 {
         // 1) increment `i` to find the smallest slot `s` in `vote_slots`
         // where `s` >= `last_voted_slot`
@@ -883,9 +883,9 @@ pub fn process_vote_unchecked(vote_state: &mut VoteState, vote: Vote) {
     let slot_hashes: Vec<_> = vote.slots.iter().rev().map(|x| (*x, vote.hash)).collect();
     // todo, check, use t_slots get t_slot_hashes is ok? add by jesse
     let t_slot_hashes: Vec<_> = vote.t_slots.iter().rev().filter(|x| x.is_some()).map(|x| (x.unwrap(), vote.t_hash.unwrap()) ).collect();
-    info!("t_slot hashes: {:?}", t_slot_hashes);
-    info!("t_hash : {:?}", vote);
-    info!("slot_hashes : {:?}", slot_hashes);
+    debug!("t_slot hashes: {:?}", t_slot_hashes);
+    debug!("t_hash : {:?}", vote);
+    debug!("slot_hashes : {:?}", slot_hashes);
     let ignored = process_vote_unfiltered(
         vote_state,
         &vote_slots,

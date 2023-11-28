@@ -347,7 +347,7 @@ impl Tower {
                 Ok(vote_state) => vote_state,
             };
             // todo delete, add by jesse
-            warn!("----------bank account vote state in collect_vote_lockouts{:?}", vote_state);
+            debug!("----------bank account vote state in collect_vote_lockouts{:?}", vote_state);
             for vote in &vote_state.votes {
                 lockout_intervals
                     .entry(vote.lockout.last_locked_out_slot())

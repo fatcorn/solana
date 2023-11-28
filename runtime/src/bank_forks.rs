@@ -278,6 +278,10 @@ impl BankForks {
 
     pub fn remove(&mut self, slot: Slot) -> Option<Arc<Bank>> {
         let bank = self.banks.remove(&slot)?;
+        // todo, check, not handle t_descendants right now, maybe handle it later, add by jesse
+        if bank.is_include_t_slot() && self.t_root() < bank.t_slot() {
+            let _ = self.t_banks.remove(&bank.t_slot())?;
+        }
         for parent in bank.proper_ancestors() {
             let mut entry = match self.descendants.entry(parent) {
                 Entry::Vacant(_) => panic!("this should not happen!"),
@@ -311,12 +315,16 @@ impl BankForks {
         root: Slot,
         accounts_background_request_sender: &AbsRequestSender,
         highest_super_majority_root: Option<Slot>,
+        t_root: Option<Slot>
     ) -> (Vec<Arc<Bank>>, SetRootMetrics) {
         let old_epoch = self.root_bank().epoch();
         // To support `RootBankCache` (via `ReadOnlyAtomicSlot`) accessing `root` *without* locking
         // BankForks first *and* from a different thread, this store *must* be at least Release to
         // ensure atomic ordering correctness.
         self.root.store(root, Ordering::Release);
+        if let Some(t_root) = t_root {
+            self.t_root.store(t_root, Ordering::Release);
+        }
 
         let root_bank = self
             .banks
@@ -493,10 +501,12 @@ impl BankForks {
             .unwrap()
             .prune(self, root);
         let set_root_start = Instant::now();
+        let t_root = if root_bank.is_include_t_slot() { Some(root_bank.t_slot()) } else { None };
         let (removed_banks, set_root_metrics) = self.do_set_root_return_metrics(
             root,
             accounts_background_request_sender,
             highest_super_majority_root,
+            t_root
         );
         datapoint_info!(
             "bank-forks_set_root",

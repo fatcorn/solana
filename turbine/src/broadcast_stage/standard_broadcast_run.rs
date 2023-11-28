@@ -253,7 +253,7 @@ impl StandardBroadcastRun {
             let (t_next_shred_index_inner, t_next_code_index_inner) = next_shred_index_compute(&t_data_shreds.clone().unwrap(), &t_coding_shreds.clone().unwrap(), false)?;
             t_next_shred_index = t_next_shred_index_inner;
             t_next_code_index = t_next_code_index_inner;
-            info!("t slot {} shred index update, next data index: {}, next code index: {}", t_slot, t_next_shred_index, t_next_code_index);
+            debug!("t slot {} shred index update, next data index: {}, next code index: {}", t_slot, t_next_shred_index, t_next_code_index);
         }
 
         self.unfinished_slot = Some(UnfinishedSlotInfo {

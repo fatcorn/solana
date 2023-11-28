@@ -16,6 +16,7 @@ use {
         time::{Duration, Instant},
     },
 };
+use solana_ledger::shred::{Shred, ShredType};
 
 const DEDUPER_FALSE_POSITIVE_RATE: f64 = 0.001;
 const DEDUPER_NUM_BITS: u64 = 637_534_199; // 76MB
@@ -99,7 +100,7 @@ fn run_shred_sigverify<const K: usize>(
     let now = Instant::now();
     stats.num_iters += 1;
     stats.num_packets += packets.iter().map(PacketBatch::len).sum::<usize>();
-    stats.num_discards_pre += count_discards(&packets);
+    stats.num_discards_pre += count_discards(&packets, true);
     stats.num_duplicates += thread_pool.install(|| {
         packets
             .par_iter_mut()
@@ -108,10 +109,24 @@ fn run_shred_sigverify<const K: usize>(
                 !packet.meta().discard()
                     && packet
                         .data(..)
-                        .map(|data| deduper.dedup(data))
+                        .map(|data| {
+                            let is_data = shred::layout::get_shred_id(data).map(|x| x.shred_type() == ShredType::Data);
+                            if let Some(is_data_type) = is_data {
+                                if is_data_type {
+                                    // if this shred type is data, not discard it
+                                    return false
+                                }
+                            }
+                            deduper.dedup(data)
+                        })
                         .unwrap_or(true)
             })
-            .map(|packet| packet.meta_mut().set_discard(true))
+            .map(|packet| {
+                // let mut packet_inner = packet.clone();
+                // let shred = Shred::new_from_serialized_shred(packet_inner.buffer_mut().to_vec());
+                // info!("packet discard {:?} in sig verify cause packet deduper judge", shred);
+                packet.meta_mut().set_discard(true)
+            })
             .count()
     });
     verify_packets(
@@ -122,12 +137,13 @@ fn run_shred_sigverify<const K: usize>(
         recycler_cache,
         &mut packets,
     );
-    stats.num_discards_post += count_discards(&packets);
+    stats.num_discards_post += count_discards(&packets, false);
     // Exclude repair packets from retransmit.
     let shreds: Vec<_> = packets
         .iter()
         .flat_map(PacketBatch::iter)
-        .filter(|packet| !packet.meta().discard() && !packet.meta().repair())
+        .filter(|packet|
+            !packet.meta().discard() && !packet.meta().repair())
         .filter_map(shred::layout::get_shred)
         .map(<[u8]>::to_vec)
         .collect();
@@ -195,11 +211,19 @@ fn get_slot_leaders(
     leaders
 }
 
-fn count_discards(packets: &[PacketBatch]) -> usize {
+fn count_discards(packets: &[PacketBatch], is_pre_count: bool) -> usize {
     packets
         .iter()
         .flat_map(PacketBatch::iter)
-        .filter(|packet| packet.meta().discard())
+        .filter(|packet|{
+            if packet.meta().discard() {
+                info!("packet discard is pre {}, is post {}", is_pre_count, !is_pre_count);
+                // let mut packet_inner = packet.clone().clone();
+                // let shred = Shred::new_from_serialized_shred(packet_inner.buffer_mut().to_vec());
+                // info!("packet discard shred info {:?}, packet source {:?}", shred, packet.meta().flags);
+            }
+            packet.meta().discard()
+        })
         .count()
 }
 
