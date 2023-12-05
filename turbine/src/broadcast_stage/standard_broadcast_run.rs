@@ -84,7 +84,7 @@ impl StandardBroadcastRun {
                 let reference_tick = max_ticks_in_slot & SHRED_TICK_REFERENCE_MASK;
                 // To do, add correct slot after UnfinishedSlotInfo complete, add by jesse
                 let shredder =
-                    Shredder::new(state.slot, state.parent, reference_tick, self.shred_version, state.slot, state.t_parent)
+                    Shredder::new(state.slot, state.parent, reference_tick, self.shred_version, state.t_slot, state.t_parent)
                         .unwrap();
                 let merkle_variant = should_use_merkle_variant(state.slot, cluster_type);
                 // todo try virtual shred compute async with truly slot

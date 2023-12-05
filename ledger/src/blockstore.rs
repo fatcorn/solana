@@ -936,26 +936,29 @@ impl Blockstore {
             } else {
                 ShredSource::Turbine
             };
-            info!(
-                "Ready to insert shred index {}\
-                 in slot {},\
-                 is t slot {},\
-                 t slot {},\
-                  shred type{:?},\
-                   shred source{:?},\
-                   last in slot {},\
-                   last in data {},\
-                   parent {:?}",
-                shred.index(),
-                shred.slot(),
-                !shred.is_virtual(),
-                shred.t_slot(),
-                shred.shred_type(),
-                shred_source,
-                shred.last_in_slot(),
-                shred.data_complete(),
-                shred.parent()
-            );
+            if shred.is_data() {
+                info!(
+                    "Ready to insert shred index {}\
+                     in slot {},\
+                     is t slot {},\
+                     t slot {},\
+                      shred type{:?},\
+                       shred source{:?},\
+                       last in slot {},\
+                       last in data {},\
+                       parent {:?}",
+                    shred.index(),
+                    shred.slot(),
+                    !shred.is_virtual(),
+                    shred.t_slot(),
+                    shred.shred_type(),
+                    shred_source,
+                    shred.last_in_slot(),
+                    shred.data_complete(),
+                    shred.parent()
+                );
+            }
+
             match shred.shred_type() {
                 ShredType::Data => {
                     let is_virtual = shred.is_virtual();
@@ -3199,6 +3202,23 @@ impl Blockstore {
         }
 
         let slot_meta = slot_meta.unwrap();
+
+        // todo, delete, if would happen this err, add by jesse
+        if let Some (max_in_completed_index) = slot_meta.completed_data_indexes.last() {
+            if (*max_in_completed_index as u64) + 1 < start_index {
+                error!("Start index {start_index} greater than the completed_data_indexes max one {max_in_completed_index}");
+                return Err(BlockstoreError::InvalidShredData(Box::new(bincode::ErrorKind::Custom(format!(
+                    "Start index {start_index} greater than the completed_data_indexes max one {max_in_completed_index}"
+                )))));
+            }
+        }
+
+        if start_index > slot_meta.consumed {
+            return Err(BlockstoreError::InvalidShredData(Box::new(bincode::ErrorKind::Custom(format!(
+                "Start index {start_index} greater than the consumed {}", slot_meta.consumed
+            )))));
+        }
+
         // Find all the ranges for the completed data blocks
         let completed_ranges = Self::get_completed_data_ranges(
             start_index as u32,
@@ -3351,9 +3371,9 @@ impl Blockstore {
             self.t_meta_cf.multi_get(slots.to_vec()).into_iter().collect()
         };
 
-        if !is_virtual {
-            info!("current slot meta ret {:?}", slot_metas);
-        }
+        // if !is_virtual {
+        //     debug!("current slot meta ret {:?}", slot_metas);
+        // }
 
         let slot_metas = slot_metas?;
 

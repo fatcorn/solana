@@ -508,7 +508,7 @@ fn check_slots_are_valid(
         // This means we never made it to steps 2) or 3) above, otherwise
         // `j` would have been decremented at least once. This means
         // there are not slots in `vote_slots` greater than `last_voted_slot`
-        warn!(
+        debug!(
             "j mismatched, {} dropped vote slots {:?}, vote hash: {:?} slot hashes:SlotHash {:?}, too old ",
             vote_state.node_pubkey, vote_slots, vote_hash, slot_hashes
         );
@@ -519,7 +519,7 @@ fn check_slots_are_valid(
         // This means we never made it to steps 2) or 3) above, otherwise
         // `t` would have been decremented at least once. This means
         // there are not slots in `vote_slots` greater than `last_voted_slot`
-        warn!(
+        debug!(
             "t mismatched, {} dropped vote t_slots {:?}, vote t_hash: {:?} slot hashes:SlotHash {:?}, too old ",
             vote_state.node_pubkey, vote_slots, t_vote_hash, t_slot_hashes
         );

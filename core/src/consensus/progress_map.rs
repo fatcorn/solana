@@ -475,6 +475,11 @@ impl ProgressMap {
             // If the leader's stats are None (isn't in the
             // progress map), this means that prev_leader slot is
             // rooted, so return true
+            // todo delete, for debugging before, add by jesse
+            // let is_propagated = self.is_propagated(leader_slot).unwrap_or(true);
+            // if !is_propagated {
+            //     warn!("leader_slot {} not propagated, validator may not generate workbank in poh", leader_slot);
+            // }
             (
                 self.is_propagated(leader_slot).unwrap_or(true),
                 Some(leader_slot),

@@ -332,7 +332,7 @@ fn retransmit_shred(
     let mut retransmit_time = Measure::start("retransmit_to");
     let num_addrs = addrs.len();
     let shd = Shred::new_from_serialized_shred(shred.to_vec()).unwrap();
-    info!(
+    debug!(
             "retransmit slot {}, t slot {}, index {} to {:?},\
              is t slot {}, shred type {:?}, last in slot {}, last in data {}",
             shd.slot(),

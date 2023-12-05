@@ -1381,7 +1381,7 @@ impl Bank {
                 parent: RwLock::new(Some(Arc::clone(parent))),
                 slot,
                 bank_id_generator: Arc::clone(&parent.rc.bank_id_generator),
-                // todo, check, just set t_parent is ok? add by jesse
+                // todo, check, just set t_parent to v parent, is ok? add by jesse
                 t_parent: RwLock::new(Some(Arc::clone(parent))),
                 // todo, wait for input, may can remove, depending on parent and slot what to use, add by jesse
                 t_slot: RwLock::new(u64::MAX),
@@ -1420,11 +1420,12 @@ impl Bank {
         let accounts_data_size_initial = parent.load_accounts_data_size();
 
         let (t_slot, t_parent_slot, t_parent_hash) = if parent.is_include_t_slot() {
-            (parent.t_slot() + 1, parent.t_slot(), parent.t_hash())
+            // todo, check, for avoiding fork t_slot duplicate production, t_slot skip slot of  (v slot - parent v slot), add by jesse
+            (parent.t_slot() + (slot - parent.slot), parent.t_slot(), parent.t_hash())
         } else {
             //if current slot's parent not, include truly slot, it's t_slot is parent's t_slot,
             // t_parent_slot still is parent's t_parent_slot, add by jesse
-            (parent.t_slot(), parent.t_parent_slot(), parent.t_parent_hash())
+            (parent.t_slot() + (slot - parent.slot) - 1, parent.t_parent_slot(), parent.t_parent_hash())
         };
         let mut new = Self {
             incremental_snapshot_persistence: None,
@@ -3954,6 +3955,11 @@ impl Bank {
         squash_accounts_time.stop();
 
         *self.rc.parent.write().unwrap() = None;
+        // todo,check,1.t_parent set to None with v_parent together is ok?, only t bank remove the t_parent relation for now add by jesse
+        // todo, check, point 1 not work, it will lead, t_root_bank parent would not purge,so let the t parent delete with v parent delete together add by jesse
+        // if self.is_include_t_slot() {
+        *self.rc.t_parent.write().unwrap() = None;
+        // }
 
         let mut squash_cache_time = Measure::start("squash_cache_time");
         roots

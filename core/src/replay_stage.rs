@@ -2050,17 +2050,17 @@ impl ReplayStage {
         );
 
         // todo, check, ignore the InvalidShredData for now, casue last data come later offen happen, make it go on read later.
-        // todo, solve plan, depends on consensus(fork or drop, or accept), or ignore the err that we offen meet, and add the err detail,
+        // todo, solve plan, depends on consensus(fork or drop, or accept), or ignore the err that we offten meet, and add the err detail,
         // todo, ignore the err we konw and marked(add new err type), add by jesse
-        let err_can_ignore = matches!(
-            err,
-            BlockstoreProcessorError::FailedToLoadEntries(BlockstoreError::InvalidShredData(_))
-        );
-
-        if err_can_ignore {
-            warn!("Err-can-ignore {:?}", err);
-            return;
-        }
+        // let err_can_ignore = matches!(
+        //     err,
+        //     BlockstoreProcessorError::FailedToLoadEntries(BlockstoreError::InvalidShredData(_))
+        // );
+        //
+        // if err_can_ignore {
+        //     warn!("Err-can-ignore {:?}", err);
+        //     return;
+        // }
 
         let slot = bank.slot();
         if is_serious {
@@ -2197,6 +2197,7 @@ impl ReplayStage {
                 t_rooted_slots.sort();
                 let mut last_slot = None;
                 info!("t_rooted_slots {:?} ready to t slots {:?}", t_rooted_slots, t_new_root);
+                //todo, fix, not delete repeat
                 t_rooted_slots.retain(|x| {
                     if last_slot.is_none() {
                         last_slot = Some(*x);
@@ -2733,7 +2734,7 @@ impl ReplayStage {
             let (num_blocks_on_fork, num_dropped_blocks_on_fork) = {
                 let stats = progress
                     .get(&parent_slot)
-                    .expect("parent of active bank must exist in progress map");
+                    .expect(&*format!("parent {parent_slot} of active bank {} must exist in progress map", bank.slot()));
                 let num_blocks_on_fork = stats.num_blocks_on_fork + 1;
                 let new_dropped_blocks = bank.slot() - parent_slot - 1;
                 let num_dropped_blocks_on_fork =
@@ -2858,9 +2859,10 @@ impl ReplayStage {
             let t_replay_progress = bank_progress.t_replay_progress.read().unwrap();
             // add new bank frozen condition
             debug!("ready to check the bank is complete");
-            info!("the bank slot is {}, include truly tx {}, bank complete {}, t slot consumed_over {}",
+            info!("the bank slot is {}, include truly tx {}, bank complete {}, v slot consumed_over {}, t slot consumed_over {}",
                 bank_slot,
                 bank.t_frozen_flag_from_v_entry(),
+                v_replay_progress.v_slot_consumed_over,
                 bank.is_complete(),
                 t_replay_progress.t_slot_consumed_over);
             let is_my_bank = bank.collector_id() == my_pubkey;

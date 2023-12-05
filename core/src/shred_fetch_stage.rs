@@ -152,6 +152,8 @@ impl ShredFetchStage {
             .collect();
         let modifier_hdl = Builder::new()
             .name("solTvuFetchPMod".to_string())
+            // Once stack overflow, set stack to 4MiB, add by jesse
+            .stack_size(4194304)
             .spawn(move || {
                 let repair_context = repair_context
                     .as_ref()

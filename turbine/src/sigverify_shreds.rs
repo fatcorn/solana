@@ -217,6 +217,7 @@ fn count_discards(packets: &[PacketBatch], is_pre_count: bool) -> usize {
         .flat_map(PacketBatch::iter)
         .filter(|packet|{
             if packet.meta().discard() {
+                // todo,
                 info!("packet discard is pre {}, is post {}", is_pre_count, !is_pre_count);
                 // let mut packet_inner = packet.clone().clone();
                 // let shred = Shred::new_from_serialized_shred(packet_inner.buffer_mut().to_vec());
