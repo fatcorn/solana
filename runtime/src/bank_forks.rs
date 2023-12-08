@@ -263,11 +263,12 @@ impl BankForks {
             debug!("prev info slot {}, t slot {}", prev.slot(), prev.t_slot());
         }
         assert!(prev.is_none());
-        let slot = bank.t_slot();
-        self.t_descendants.entry(slot).or_default();
-        for t_parent in bank.t_proper_ancestors() {
-            self.t_descendants.entry(t_parent).or_default().insert(slot);
-        }
+        // todo, check, not insert t_descendants for now, seems like it not need t_descendants, if need, should delete t_descendants too
+        // let slot = bank.t_slot();
+        // self.t_descendants.entry(slot).or_default();
+        // for t_parent in bank.t_proper_ancestors() {
+        //     self.t_descendants.entry(t_parent).or_default().insert(slot);
+        // }
         bank
     }
 
@@ -279,7 +280,8 @@ impl BankForks {
     pub fn remove(&mut self, slot: Slot) -> Option<Arc<Bank>> {
         let bank = self.banks.remove(&slot)?;
         // todo, check, not handle t_descendants right now, maybe handle it later, add by jesse
-        if bank.is_include_t_slot() && self.t_root() < bank.t_slot() {
+        // condition (self.root() > slot && !self.descendants[slot].contains(&self.root())) for solve the parent not find in progress panic
+        if bank.is_include_t_slot() && (self.t_root() < bank.t_slot() || (self.root() > slot && !self.descendants[&slot].contains(&self.root()))) {
             let _ = self.t_banks.remove(&bank.t_slot())?;
         }
         for parent in bank.proper_ancestors() {

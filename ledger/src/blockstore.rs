@@ -2211,6 +2211,16 @@ impl Blockstore {
         self.block_height_cf.put(slot, &block_height)
     }
 
+    pub fn cache_t_block_height(&self, slot: Slot, block_height: u64) -> Result<()> {
+        self.t_block_height_cf.put(slot, &block_height)
+    }
+
+    pub fn get_t_block_height(&self, slot: Slot) -> Result<Option<u64>> {
+        datapoint_info!("blockstore-rpc-api", ("method", "get_t_block_height", String));
+        // let _lock = self.check_lowest_cleanup_slot(slot)?;
+        self.t_block_height_cf.get(slot)
+    }
+
     /// The first complete block that is available in the Blockstore ledger
     pub fn get_first_available_block(&self) -> Result<Slot> {
         let mut root_iterator = self.rooted_slot_iterator(self.lowest_slot_with_genesis())?;
@@ -2234,8 +2244,8 @@ impl Blockstore {
         datapoint_info!("blockstore-rpc-api", ("method", "get_rooted_block", String));
         let _lock = self.check_lowest_cleanup_slot(slot)?;
 
-        if self.is_root(slot) {
-            return self.get_complete_block(slot, require_previous_blockhash);
+        if self.is_t_root(slot) {
+            return self.get_t_complete_block(slot, require_previous_blockhash);
         }
         Err(BlockstoreError::SlotNotRooted)
     }
@@ -2250,7 +2260,7 @@ impl Blockstore {
             return Err(BlockstoreError::SlotUnavailable);
         };
         if slot_meta.is_full() {
-            let slot_entries = self.get_slot_entries(slot, 0)?;
+            let slot_entries = self.get_slot_entries(slot, 0, true)?;
             if !slot_entries.is_empty() {
                 let blockhash = slot_entries
                     .last()
@@ -2273,7 +2283,7 @@ impl Blockstore {
                 let parent_slot_entries = slot_meta
                     .parent_slot
                     .and_then(|parent_slot| {
-                        self.get_slot_entries(parent_slot, /*shred_start_index:*/ 0)
+                        self.get_slot_entries(parent_slot, /*shred_start_index:*/ 0, true)
                             .ok()
                     })
                     .unwrap_or_default();
@@ -2316,6 +2326,83 @@ impl Blockstore {
         Err(BlockstoreError::SlotUnavailable)
     }
 
+    // todo,merge with get_complete_block, add by jesse
+    pub fn get_t_complete_block(
+        &self,
+        slot: Slot,
+        require_previous_blockhash: bool,
+    ) -> Result<VersionedConfirmedBlock> {
+        let Some(slot_meta) = self.t_meta_cf.get(slot)? else {
+            info!("SlotMeta not found for slot {}", slot);
+            return Err(BlockstoreError::SlotUnavailable);
+        };
+        if slot_meta.is_full() {
+            let slot_entries = self.get_slot_entries(slot, 0, false)?;
+            if !slot_entries.is_empty() {
+                let blockhash = slot_entries
+                    .last()
+                    .map(|entry| entry.hash)
+                    .unwrap_or_else(|| panic!("Rooted slot {slot:?} must have blockhash"));
+                let slot_transaction_iterator = slot_entries
+                    .into_iter()
+                    .flat_map(|entry| entry.transactions)
+                    .map(|transaction| {
+                        if let Err(err) = transaction.sanitize() {
+                            warn!(
+                                "Blockstore::get_block sanitize failed: {:?}, \
+                                slot: {:?}, \
+                                {:?}",
+                                err, slot, transaction,
+                            );
+                        }
+                        transaction
+                    });
+                let parent_slot_entries = slot_meta
+                    .parent_slot
+                    .and_then(|parent_slot| {
+                        self.get_slot_entries(parent_slot, /*shred_start_index:*/ 0, false)
+                            .ok()
+                    })
+                    .unwrap_or_default();
+                if parent_slot_entries.is_empty() && require_previous_blockhash {
+                    return Err(BlockstoreError::ParentEntriesUnavailable);
+                }
+                let previous_blockhash = if !parent_slot_entries.is_empty() {
+                    get_last_hash(parent_slot_entries.iter()).unwrap()
+                } else {
+                    Hash::default()
+                };
+
+                let rewards = self
+                    .rewards_cf
+                    .get_protobuf_or_bincode::<StoredExtendedRewards>(slot_meta.linked_slot)?
+                    .unwrap_or_default()
+                    .into();
+
+                // The Blocktime and BlockHeight column families are updated asynchronously; they
+                // may not be written by the time the complete slot entries are available. In this
+                // case, these fields will be `None`.
+                let block_time = self.blocktime_cf.get(slot_meta.linked_slot)?;
+                let block_height = self.t_block_height_cf.get(slot)?;
+
+                let block = VersionedConfirmedBlock {
+                    previous_blockhash: previous_blockhash.to_string(),
+                    blockhash: blockhash.to_string(),
+                    // If the slot is full it should have parent_slot populated
+                    // from shreds received.
+                    parent_slot: slot_meta.parent_slot.unwrap(),
+                    transactions: self
+                        .map_t_transactions_to_statuses(slot, slot_transaction_iterator)?,
+                    rewards,
+                    block_time,
+                    block_height,
+                };
+                return Ok(block);
+            }
+        }
+        Err(BlockstoreError::SlotUnavailable)
+    }
+
     pub fn map_transactions_to_statuses(
         &self,
         slot: Slot,
@@ -2328,6 +2415,25 @@ impl Blockstore {
                     transaction,
                     meta: self
                         .read_transaction_status((signature, slot))?
+                        .ok_or(BlockstoreError::MissingTransactionMetadata)?,
+                })
+            })
+            .collect()
+    }
+
+    // todo, merge with v slot related func, add by jesse
+    pub fn map_t_transactions_to_statuses(
+        &self,
+        slot: Slot,
+        iterator: impl Iterator<Item = VersionedTransaction>,
+    ) -> Result<Vec<VersionedTransactionWithStatusMeta>> {
+        iterator
+            .map(|transaction| {
+                let signature = transaction.signatures[0];
+                Ok(VersionedTransactionWithStatusMeta {
+                    transaction,
+                    meta: self
+                        .read_t_transaction_status((signature, slot))?
                         .ok_or(BlockstoreError::MissingTransactionMetadata)?,
                 })
             })
@@ -2442,6 +2548,24 @@ impl Blockstore {
         }
     }
 
+    pub fn read_t_transaction_status(
+        &self,
+        index: (Signature, Slot),
+    ) -> Result<Option<TransactionStatusMeta>> {
+        let (signature, slot) = index;
+        let result = self
+            .t_transaction_status_cf
+            .get_protobuf_or_bincode::<StoredTransactionStatusMeta>((0, signature, slot))?;
+        if result.is_none() {
+            Ok(self
+                .t_transaction_status_cf
+                .get_protobuf_or_bincode::<StoredTransactionStatusMeta>((1, signature, slot))?
+                .and_then(|meta| meta.try_into().ok()))
+        } else {
+            Ok(result.and_then(|meta| meta.try_into().ok()))
+        }
+    }
+
     pub fn write_transaction_status(
         &self,
         slot: Slot,
@@ -2525,8 +2649,10 @@ impl Blockstore {
         let mut counter = 0;
         let (lock, lowest_available_slot) = self.ensure_lowest_cleanup_slot();
 
+
         for transaction_status_cf_primary_index in 0..=1 {
-            let index_iterator = self.transaction_status_cf.iter(IteratorMode::From(
+            // todo, strait replace to t_transaction_status_cf for now, add is_virtual later, and TTransactionStatus may replaced by TransactionStatus, add by jesse
+            let index_iterator = self.t_transaction_status_cf.iter(IteratorMode::From(
                 (
                     transaction_status_cf_primary_index,
                     signature,
@@ -2543,7 +2669,7 @@ impl Blockstore {
                     continue;
                 }
                 let status = self
-                    .transaction_status_cf
+                    .t_transaction_status_cf
                     .get_protobuf_or_bincode::<StoredTransactionStatusMeta>((i, sig, slot))?
                     .and_then(|status| status.try_into().ok())
                     .map(|status| (slot, status));
@@ -2641,7 +2767,7 @@ impl Blockstore {
         slot: Slot,
         signature: Signature,
     ) -> Result<Option<VersionedTransaction>> {
-        let slot_entries = self.get_slot_entries(slot, 0)?;
+        let slot_entries = self.get_slot_entries(slot, 0, false)?;
         Ok(slot_entries
             .iter()
             .cloned()
@@ -3072,9 +3198,9 @@ impl Blockstore {
     }
 
     /// Returns the entry vector for the slot starting with `shred_start_index`
-    pub fn get_slot_entries(&self, slot: Slot, shred_start_index: u64) -> Result<Vec<Entry>> {
+    pub fn get_slot_entries(&self, slot: Slot, shred_start_index: u64, is_virtual: bool) -> Result<Vec<Entry>> {
         // todo, input valid is_virtual in later, add by jesse
-        self.get_slot_entries_with_shred_info(slot, shred_start_index, false, true)
+        self.get_slot_entries_with_shred_info(slot, shred_start_index, false, is_virtual)
             .map(|x| x.0)
     }
 
@@ -3156,7 +3282,8 @@ impl Blockstore {
         (starting_slot..=ending_slot)
             .into_par_iter()
             .for_each(|slot| {
-                if let Ok(entries) = self.get_slot_entries(slot, 0) {
+                // todo, input the is_virtual flag, add by jesse
+                if let Ok(entries) = self.get_slot_entries(slot, 0, false) {
                     entries.into_par_iter().for_each(|entry| {
                         entry.transactions.into_iter().for_each(|tx| {
                             if let Some(lookups) = tx.message.address_table_lookups() {
@@ -3404,6 +3531,10 @@ impl Blockstore {
 
     pub fn is_root(&self, slot: Slot) -> bool {
         matches!(self.db.get::<cf::Root>(slot), Ok(Some(true)))
+    }
+
+    pub fn is_t_root(&self, slot: Slot) -> bool {
+        matches!(self.db.get::<cf::TRoot>(slot), Ok(Some(true)))
     }
 
     /// Returns true if a slot is between the rooted slot bounds of the ledger, but has not itself

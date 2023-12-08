@@ -1424,7 +1424,7 @@ impl TypedColumn for columns::TBlocktime {
     type Type = UnixTimestamp;
 }
 
-// Truly TransactionStatus column
+// Truly TransactionStatus column, todo, check, may can remove, use TransactionStatus is ok, add by jesse
 impl Column for columns::TTransactionStatus {
     type Index = (u64, Signature, Slot);
 

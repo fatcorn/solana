@@ -1094,6 +1094,7 @@ impl JsonRpcRequestProcessor {
                     .highest_super_majority_root()
             {
                 self.check_blockstore_writes_complete(slot)?;
+                // todo, input the is_virtual flag, now only query t block, add by jesse
                 let result = self.blockstore.get_rooted_block(slot, true);
                 self.check_blockstore_root(&result, slot)?;
                 let encode_block = |confirmed_block: ConfirmedBlock| -> Result<UiConfirmedBlock> {
@@ -1107,6 +1108,7 @@ impl JsonRpcRequestProcessor {
                     Ok(encoded_block)
                 };
                 if result.is_err() {
+                    error!("get_block error {:?}", result);
                     if let Some(bigtable_ledger_storage) = &self.bigtable_ledger_storage {
                         let bigtable_result =
                             bigtable_ledger_storage.get_confirmed_block(slot).await;
@@ -1473,6 +1475,7 @@ impl JsonRpcRequestProcessor {
         signature: Signature,
         config: Option<RpcEncodingConfigWrapper<RpcTransactionConfig>>,
     ) -> Result<Option<EncodedConfirmedTransactionWithStatusMeta>> {
+        //todo, input the is_virtual flag
         let config = config
             .map(|config| config.convert_to_current())
             .unwrap_or_default();
@@ -1484,7 +1487,8 @@ impl JsonRpcRequestProcessor {
         if self.config.enable_rpc_transaction_history {
             let confirmed_bank = self.bank(Some(CommitmentConfig::confirmed()));
             let confirmed_transaction = if commitment.is_confirmed() {
-                let highest_confirmed_slot = confirmed_bank.slot();
+                // todo, check, go strait use t_slot for now, add by jesse
+                let highest_confirmed_slot = confirmed_bank.t_slot();
                 self.blockstore
                     .get_complete_transaction(signature, highest_confirmed_slot)
             } else {
