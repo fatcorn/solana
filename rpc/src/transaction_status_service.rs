@@ -73,8 +73,11 @@ impl TransactionStatusService {
                 token_balances,
                 rent_debits,
                 transaction_indexes,
+                is_virtual
             }) => {
-                let slot = bank.slot();
+                let indeed_slot = if is_virtual{ bank.slot() } else { bank.t_slot() };
+                // todo, check, notifier slot use v_slot at current, add by jesse.
+                let v_slot = bank.slot();
                 for (
                     transaction,
                     execution_result,
@@ -170,7 +173,7 @@ impl TransactionStatusService {
 
                         if let Some(transaction_notifier) = transaction_notifier.as_ref() {
                             transaction_notifier.write().unwrap().notify_transaction(
-                                slot,
+                                v_slot,
                                 transaction_index,
                                 transaction.signature(),
                                 &transaction_status_meta,
@@ -194,11 +197,12 @@ impl TransactionStatusService {
 
                             blockstore
                                 .write_transaction_status(
-                                    slot,
+                                    indeed_slot,
                                     *transaction.signature(),
                                     tx_account_locks.writable,
                                     tx_account_locks.readonly,
                                     transaction_status_meta,
+                                    is_virtual
                                 )
                                 .expect("Expect database write to succeed: TransactionStatus");
                         }

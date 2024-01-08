@@ -143,6 +143,7 @@ fn execute_batch(
     timings: &mut ExecuteTimings,
     log_messages_bytes_limit: Option<usize>,
     prioritization_fee_cache: &PrioritizationFeeCache,
+    is_virtual: bool
 ) -> Result<()> {
     let TransactionBatchWithIndexes {
         batch,
@@ -207,6 +208,7 @@ fn execute_batch(
             token_balances,
             rent_debits,
             transaction_indexes.to_vec(),
+            is_virtual
         );
     }
 
@@ -230,6 +232,7 @@ fn execute_batches_internal(
     replay_vote_sender: Option<&ReplayVoteSender>,
     log_messages_bytes_limit: Option<usize>,
     prioritization_fee_cache: &PrioritizationFeeCache,
+    is_virtual: bool
 ) -> Result<ExecuteBatchesInternalMetrics> {
     assert!(!batches.is_empty());
     let execution_timings_per_thread: Mutex<HashMap<usize, ThreadExecuteTimings>> =
@@ -253,6 +256,7 @@ fn execute_batches_internal(
                             &mut timings,
                             log_messages_bytes_limit,
                             prioritization_fee_cache,
+                            is_virtual,
                         )
                     },
                     "execute_batch",
@@ -323,6 +327,7 @@ fn execute_batches(
     timing: &mut BatchExecutionTiming,
     log_messages_bytes_limit: Option<usize>,
     prioritization_fee_cache: &PrioritizationFeeCache,
+    is_virtual: bool
 ) -> Result<()> {
     if batches.is_empty() {
         return Ok(());
@@ -405,6 +410,7 @@ fn execute_batches(
         replay_vote_sender,
         log_messages_bytes_limit,
         prioritization_fee_cache,
+        is_virtual
     )?;
 
     timing.accumulate(execute_batches_internal_metrics);
@@ -460,6 +466,7 @@ pub fn process_entries_for_tests(
         &mut batch_timing,
         None,
         &ignored_prioritization_fee_cache,
+        true
     );
 
     debug!("process_entries: {:?}", batch_timing);
@@ -476,6 +483,7 @@ fn process_entries(
     batch_timing: &mut BatchExecutionTiming,
     log_messages_bytes_limit: Option<usize>,
     prioritization_fee_cache: &PrioritizationFeeCache,
+    is_virtual: bool
 ) -> Result<()> {
     // accumulator for entries that can be processed in parallel
     let mut batches = vec![];
@@ -502,6 +510,7 @@ fn process_entries(
                         batch_timing,
                         log_messages_bytes_limit,
                         prioritization_fee_cache,
+                        is_virtual
                     )?;
                     batches.clear();
                     // todo, check carefully, for make the block last tick register in bank frozen stage(after t slot consumed over),
@@ -567,6 +576,7 @@ fn process_entries(
                             batch_timing,
                             log_messages_bytes_limit,
                             prioritization_fee_cache,
+                            is_virtual
                         )?;
                         batches.clear();
                     }
@@ -586,6 +596,7 @@ fn process_entries(
         batch_timing,
         log_messages_bytes_limit,
         prioritization_fee_cache,
+        is_virtual
     )?;
     for hash in tick_hashes {
         bank.register_tick(hash);
@@ -920,6 +931,7 @@ fn confirm_full_slot(
     entry_notification_sender: Option<&EntryNotifierSender>,
     replay_vote_sender: Option<&ReplayVoteSender>,
     timing: &mut ExecuteTimings,
+    is_virtual: bool
 ) -> result::Result<(), BlockstoreProcessorError> {
     let mut confirmation_timing = ConfirmationTiming::default();
     let skip_verification = !opts.run_verification;
@@ -939,7 +951,7 @@ fn confirm_full_slot(
         opts.allow_dead_slots,
         opts.runtime_config.log_messages_bytes_limit,
         &ignored_prioritization_fee_cache,
-        true
+        is_virtual
     )?;
 
     timing.accumulate(&confirmation_timing.batch_execute.totals);
@@ -1204,7 +1216,8 @@ fn confirm_slot_entries(
         verify_ticks(bank, &entries, slot_full, tick_hash_count).map_err(|err| {
             warn!(
                 "{:#?}, slot: {}, entry len: {}, tick_height: {}, last entry: {}, \
-                last_blockhash: {}, shred_index: {}, slot_full: {}, is_virtual {}",
+                last_blockhash: {}, shred_index: {}, slot_full: {}, is_virtual {},\
+                max_tick_height: {}, tick_count: {}",
                 err,
                 slot,
                 num_entries,
@@ -1214,6 +1227,8 @@ fn confirm_slot_entries(
                 num_shreds,
                 slot_full,
                 is_virtual,
+                bank.max_tick_height(),
+                entries.tick_count()
             );
             err
         })?;
@@ -1285,6 +1300,7 @@ fn confirm_slot_entries(
         batch_execute_timing,
         log_messages_bytes_limit,
         prioritization_fee_cache,
+        is_virtual
     )
     .map_err(BlockstoreProcessorError::from);
     replay_timer.stop();
@@ -1354,18 +1370,25 @@ fn process_bank_0(
 ) {
     assert_eq!(bank0.slot(), 0);
     let mut progress = ConfirmationProgress::new(bank0.last_blockhash());
-    confirm_full_slot(
-        blockstore,
-        bank0,
-        opts,
-        recyclers,
-        &mut progress,
-        None,
-        entry_notification_sender,
-        None,
-        &mut ExecuteTimings::default(),
-    )
-    .expect("Failed to process bank 0 from ledger. Did you forget to provide a snapshot?");
+    let mut t_progress = ConfirmationProgress::new(bank0.last_blockhash());
+    let mut confirm_full_slot_fn = |is_virtual: bool, progress: &mut ConfirmationProgress,| {
+        confirm_full_slot(
+            blockstore,
+            bank0,
+            opts,
+            recyclers,
+            progress,
+            None,
+            entry_notification_sender,
+            None,
+            &mut ExecuteTimings::default(),
+            // todo, check, genesis block only excute v_irtual slot ok? should ok, but add t_slot to confirm should ok too, add by jesse
+            is_virtual
+        ).expect("Failed to process bank 0 from ledger. Did you forget to provide a snapshot?");
+    };
+    confirm_full_slot_fn(false, &mut t_progress);
+    confirm_full_slot_fn(true, &mut progress);
+
     // todo, check, the last tick will register on bank frozen logic for flower t_slot consumed over, add by jesse
     let last_tick_hash = progress.last_entry;
     bank0.register_tick(&last_tick_hash);
@@ -1389,7 +1412,7 @@ fn process_next_slots(
     if meta.next_slots.is_empty() {
         return Ok(());
     }
-
+    debug!("process next slot form {}, tick_height: {}, max_tick_height: {}, next_slots {:?}", bank.slot(), bank.tick_height(), bank.max_tick_height(), meta.next_slots);
     // This is a fork point if there are multiple children, create a new child bank for each fork
     for next_slot in &meta.next_slots {
         let skip_next_slot = halt_at_slot
@@ -1407,9 +1430,23 @@ fn process_next_slots(
             })?
             .unwrap();
 
+        let t_next_meta = blockstore
+            .indeed_meta(next_meta.linked_slot, false)
+            .map_err(|err| {
+                warn!("Failed to load meta for slot {}: {:?}", next_meta.linked_slot, err);
+                BlockstoreProcessorError::FailedToLoadMeta
+            })?;
+        // Only t_meta's linked_slot can indicate related between t_slot and v_slot
+        let (bank_include_t_slot, t_meta_is_full) = if let Some(t_meta) = &t_next_meta {
+            debug!("t_slot {} meta info {:?}", t_meta.slot, t_meta);
+            (t_meta.linked_slot == next_meta.slot, t_meta.is_full())
+        } else {
+            (false, false)
+        };
+
         // Only process full slots in blockstore_processor, replay_stage
         // handles any partials
-        if next_meta.is_full() {
+        if next_meta.is_full() && (!bank_include_t_slot || t_meta_is_full) {
             let next_bank = Bank::new_from_parent(
                 bank,
                 &leader_schedule_cache
@@ -1417,6 +1454,10 @@ fn process_next_slots(
                     .unwrap(),
                 *next_slot,
             );
+            if bank_include_t_slot {
+                let t_next_meta = t_next_meta.unwrap();
+                next_bank.update_t_slot_related(t_next_meta.slot, t_next_meta.parent_slot.unwrap(), next_bank.t_parent().unwrap());
+            }
             trace!(
                 "New bank for slot {}, parent slot is {}",
                 next_slot,
@@ -1476,6 +1517,7 @@ fn load_frozen_forks(
         opts.halt_at_slot,
     )?;
 
+
     let on_halt_store_hash_raw_data_for_debug = opts.on_halt_store_hash_raw_data_for_debug;
     if Some(bank_forks.read().unwrap().root()) != opts.halt_at_slot {
         let recyclers = VerifyRecyclers::default();
@@ -1494,6 +1536,7 @@ fn load_frozen_forks(
             timing.details.per_program_timings.clear();
             let (meta, bank, last_entry_hash) = pending_slots.pop().unwrap();
             let slot = bank.slot();
+            info!("ready add {slot} to bank forks, include t slot {}", bank.is_include_t_slot());
             if last_status_report.elapsed() > STATUS_REPORT_INTERVAL {
                 let secs = last_status_report.elapsed().as_secs() as f32;
                 let slots_per_sec = slots_processed as f32 / secs;
@@ -1523,6 +1566,7 @@ fn load_frozen_forks(
             }
 
             let mut progress = ConfirmationProgress::new(last_entry_hash);
+            let mut t_progress = ConfirmationProgress::new(bank.t_parent_hash());
             let mut m = Measure::start("process_single_slot");
             let bank = bank_forks.write().unwrap().insert_from_ledger(bank);
             if process_single_slot(
@@ -1531,6 +1575,7 @@ fn load_frozen_forks(
                 opts,
                 &recyclers,
                 &mut progress,
+                &mut t_progress,
                 transaction_status_sender,
                 cache_block_meta_sender,
                 entry_notification_sender,
@@ -1539,6 +1584,7 @@ fn load_frozen_forks(
             )
             .is_err()
             {
+                warn!("ready remove {slot} to bank forks");
                 assert!(bank_forks.write().unwrap().remove(bank.slot()).is_some());
                 continue;
             }
@@ -1731,6 +1777,7 @@ fn process_single_slot(
     opts: &ProcessOptions,
     recyclers: &VerifyRecyclers,
     progress: &mut ConfirmationProgress,
+    t_progress: &mut ConfirmationProgress,
     transaction_status_sender: Option<&TransactionStatusSender>,
     cache_block_meta_sender: Option<&CacheBlockMetaSender>,
     entry_notification_sender: Option<&EntryNotifierSender>,
@@ -1739,33 +1786,41 @@ fn process_single_slot(
 ) -> result::Result<(), BlockstoreProcessorError> {
     // Mark corrupt slots as dead so validators don't replay this slot and
     // see AlreadyProcessed errors later in ReplayStage
-    confirm_full_slot(
-        blockstore,
-        bank,
-        opts,
-        recyclers,
-        progress,
-        transaction_status_sender,
-        entry_notification_sender,
-        replay_vote_sender,
-        timing,
-    )
-    .map_err(|err| {
-        let slot = bank.slot();
-        warn!("slot {} failed to verify: {}", slot, err);
-        if blockstore.is_primary_access() {
-            blockstore
-                .set_dead_slot(slot)
-                .expect("Failed to mark slot as dead in blockstore");
-        } else {
-            info!(
-                "Failed slot {} won't be marked dead due to being secondary blockstore access",
-                slot
-            );
-        }
-        err
-    })?;
+    let mut confirm_full_slot_func = |is_virtual: bool, progress: &mut ConfirmationProgress,| {
+        confirm_full_slot(
+            blockstore,
+            bank,
+            opts,
+            recyclers,
+            progress,
+            transaction_status_sender,
+            entry_notification_sender,
+            replay_vote_sender,
+            timing,
+            is_virtual
+        ).map_err(|err| {
+            let slot = bank.slot();
+            warn!("slot {} failed to verify: {:?}", slot, err);
+            if blockstore.is_primary_access() {
+                blockstore
+                    .set_dead_slot(slot)
+                    .expect("Failed to mark slot as dead in blockstore");
+            } else {
+                info!(
+                    "Failed slot {} won't be marked dead due to being secondary blockstore access",
+                    slot
+                );
+            }
+            err
+        })
+    };
+    if bank.is_include_t_slot() {
+        confirm_full_slot_func(false, t_progress)?
+    }
+    confirm_full_slot_func(true, progress)?;
 
+    // todo, check, add by jesse
+    bank.register_tick(&progress.last_entry);
     bank.freeze(); // all banks handled by this routine are created from complete slots
     if blockstore.is_primary_access() {
         blockstore.insert_bank_hash(bank.slot(), bank.hash(), false);
@@ -1789,6 +1844,7 @@ pub struct TransactionStatusBatch {
     pub token_balances: TransactionTokenBalancesSet,
     pub rent_debits: Vec<RentDebits>,
     pub transaction_indexes: Vec<usize>,
+    pub is_virtual: bool
 }
 
 #[derive(Clone)]
@@ -1806,6 +1862,7 @@ impl TransactionStatusSender {
         token_balances: TransactionTokenBalancesSet,
         rent_debits: Vec<RentDebits>,
         transaction_indexes: Vec<usize>,
+        is_virtual: bool
     ) {
         let slot = bank.slot();
 
@@ -1825,6 +1882,7 @@ impl TransactionStatusSender {
                 token_balances,
                 rent_debits,
                 transaction_indexes,
+                is_virtual
             }))
         {
             trace!(

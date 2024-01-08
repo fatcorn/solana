@@ -177,7 +177,7 @@ pub fn send_many_transactions(
 
 pub fn verify_ledger_ticks(ledger_path: &Path, ticks_per_slot: usize) {
     let ledger = Blockstore::open(ledger_path).unwrap();
-    let zeroth_slot = ledger.get_slot_entries(0, 0).unwrap();
+    let zeroth_slot = ledger.get_slot_entries(0, 0, true).unwrap();
     let last_id = zeroth_slot.last().unwrap().hash;
     // todo, check is_virtual = true ok here and next line? add by jesse
     let next_slots = ledger.get_slots_since(&[0], true).unwrap().remove(&0).unwrap();
@@ -562,7 +562,7 @@ fn get_and_verify_slot_entries(
     slot: Slot,
     last_entry: &Hash,
 ) -> Vec<Entry> {
-    let entries = blockstore.get_slot_entries(slot, 0).unwrap();
+    let entries = blockstore.get_slot_entries(slot, 0, true).unwrap();
     assert!(entries.verify(last_entry));
     entries
 }

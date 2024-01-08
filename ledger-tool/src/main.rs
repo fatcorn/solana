@@ -4012,8 +4012,9 @@ fn main() {
                     .into_iter()
                     .rev()
                     .for_each(|slot| {
+                        // todo, input valid args
                         let blockhash = blockstore
-                            .get_slot_entries(slot, 0)
+                            .get_slot_entries(slot, 0, true)
                             .unwrap()
                             .last()
                             .unwrap()

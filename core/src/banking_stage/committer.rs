@@ -73,6 +73,7 @@ impl Committer {
         executed_transactions_count: usize,
         executed_non_vote_transactions_count: usize,
         executed_with_successful_result_count: usize,
+        is_virtual: bool
     ) -> (u64, Vec<CommitTransactionDetails>) {
         let (last_blockhash, lamports_per_signature) =
             bank.last_blockhash_and_lamports_per_signature();
@@ -124,6 +125,7 @@ impl Committer {
                 batch,
                 pre_balance_info,
                 starting_transaction_index,
+                is_virtual
             );
             self.prioritization_fee_cache
                 .update(bank, executed_transactions.into_iter());
@@ -139,6 +141,7 @@ impl Committer {
         batch: &TransactionBatch,
         pre_balance_info: &mut PreBalanceInfo,
         starting_transaction_index: Option<usize>,
+        is_virtual: bool
     ) {
         if let Some(transaction_status_sender) = &self.transaction_status_sender {
             let txs = batch.sanitized_transactions().to_vec();
@@ -173,6 +176,7 @@ impl Committer {
                 ),
                 tx_results.rent_debits,
                 batch_transaction_indexes,
+                is_virtual
             );
         }
     }

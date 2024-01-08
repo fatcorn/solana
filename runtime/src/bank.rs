@@ -1971,7 +1971,7 @@ impl Bank {
 
             // todo check
             t_hash : RwLock::new(fields.t_hash),
-            t_slot: RwLock::new(fields.slot),
+            t_slot: RwLock::new(fields.t_slot),
             t_parent_hash:  RwLock::new(fields.t_parent_hash),
             t_parent_slot:  RwLock::new(fields.t_parent_slot),
             t_block_height:  RwLock::new(fields.t_block_height),

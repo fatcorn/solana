@@ -95,7 +95,8 @@ impl SavedTower {
         }
 
         // SavedTower always stores its data in 1_14_11 format
-        let tower: Tower1_14_11 = tower.clone().into();
+        // todo, check, tower format to current version, add by jesse
+        // let tower: Tower1_14_11 = tower.clone().into();
 
         let data = bincode::serialize(&tower)?;
         let signature = keypair.sign_message(&data);

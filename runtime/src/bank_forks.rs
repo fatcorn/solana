@@ -82,7 +82,12 @@ impl Index<u64> for BankForks {
 impl BankForks {
     pub fn new(bank: Bank) -> Self {
         let root = bank.slot();
-        let t_root = bank.t_slot();
+        let t_root = if bank.is_include_t_slot() {
+            bank.t_slot()
+        } else {
+            bank.t_parent_slot()
+        };
+        info!("forks new, root {}, t_root {}", root, t_root );
         Self::new_from_banks(&[Arc::new(bank)], root, t_root)
     }
 
@@ -188,8 +193,12 @@ impl BankForks {
 
         // Iterate through the heads of all the different forks
         for bank in initial_forks {
+
             banks.insert(bank.slot(), bank.clone());
-            t_banks.insert(bank.t_slot(), bank.clone());
+            // todo check, check, reboot, only bank is true insert to t_banks? add by jesse
+            if bank.is_include_t_slot() {
+                t_banks.insert(bank.t_slot(), bank.clone());
+            }
 
             let parents = bank.parents();
             for parent in parents {
@@ -274,7 +283,12 @@ impl BankForks {
 
     pub fn insert_from_ledger(&mut self, bank: Bank) -> Arc<Bank> {
         self.highest_slot_at_startup = std::cmp::max(self.highest_slot_at_startup, bank.slot());
-        self.insert(bank)
+
+        let ret_bank = self.insert(bank);
+        if ret_bank.is_include_t_slot() {
+            self.insert_to_t_banks(ret_bank.clone());
+        }
+        ret_bank
     }
 
     pub fn remove(&mut self, slot: Slot) -> Option<Arc<Bank>> {

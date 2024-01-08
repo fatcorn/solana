@@ -199,6 +199,8 @@ pub struct SlotInfo {
     pub slot: Slot,
     pub parent: Slot,
     pub root: Slot,
+    pub t_root: Slot,
+    pub t_slot: Slot
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]

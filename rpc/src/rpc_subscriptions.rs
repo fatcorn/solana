@@ -727,8 +727,8 @@ impl RpcSubscriptions {
         self.enqueue_notification(NotificationEntry::SlotUpdate(slot_update));
     }
 
-    pub fn notify_slot(&self, slot: Slot, parent: Slot, root: Slot) {
-        self.enqueue_notification(NotificationEntry::Slot(SlotInfo { slot, parent, root }));
+    pub fn notify_slot(&self, slot: Slot, parent: Slot, root: Slot, t_slot: Slot, t_root: Slot) {
+        self.enqueue_notification(NotificationEntry::Slot(SlotInfo { slot, parent, root, t_slot, t_root}));
         self.enqueue_notification(NotificationEntry::SlotUpdate(SlotUpdate::CreatedBank {
             slot,
             parent,

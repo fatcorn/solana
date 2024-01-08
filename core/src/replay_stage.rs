@@ -1941,10 +1941,11 @@ impl ReplayStage {
             }
 
             let root_slot = bank_forks.read().unwrap().root();
+            let t_root_slot = bank_forks.read().unwrap().t_root();
             datapoint_info!("replay_stage-my_leader_slot", ("slot", poh_slot, i64),);
             info!(
-                "new fork:{} parent:{} (leader) root:{}",
-                poh_slot, parent_slot, root_slot
+                "new fork:{} parent:{} (leader) root:{} t_root:{}",
+                poh_slot, parent_slot, root_slot, t_root_slot
             );
 
             let root_distance = poh_slot - root_slot;
@@ -1962,6 +1963,7 @@ impl ReplayStage {
                 my_pubkey,
                 rpc_subscriptions,
                 NewBankOptions { vote_only_bank },
+                t_root_slot
             );
             // make sure parent is frozen for finalized hashes via the above
             // new()-ing of its child bank
@@ -3961,6 +3963,7 @@ impl ReplayStage {
                     &leader,
                     rpc_subscriptions,
                     NewBankOptions::default(),
+                    forks.t_root(),
                 );
                 let empty: Vec<Pubkey> = vec![];
                 Self::update_fork_propagated_threshold_from_votes(
@@ -4049,8 +4052,10 @@ impl ReplayStage {
         leader: &Pubkey,
         rpc_subscriptions: &Arc<RpcSubscriptions>,
         new_bank_options: NewBankOptions,
+        t_root_slot: u64,
     ) -> Bank {
-        rpc_subscriptions.notify_slot(slot, parent.slot(), root_slot);
+        // todo, check. use parent t slot, and t_root, should be ok, add by jesse
+        rpc_subscriptions.notify_slot(slot, parent.slot(), root_slot, parent.t_slot(), t_root_slot);
         Bank::new_from_parent_with_options(parent, leader, slot, new_bank_options)
     }
 

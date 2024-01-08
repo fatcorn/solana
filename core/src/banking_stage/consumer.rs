@@ -654,6 +654,7 @@ impl Consumer {
                 executed_transactions_count,
                 executed_non_vote_transactions_count,
                 executed_with_successful_result_count,
+                is_vote
             )
         } else {
             (

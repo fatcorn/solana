@@ -2573,16 +2573,27 @@ impl Blockstore {
         writable_keys: Vec<&Pubkey>,
         readonly_keys: Vec<&Pubkey>,
         status: TransactionStatusMeta,
+        is_virtual: bool
     ) -> Result<()> {
         let status = status.into();
         // This write lock prevents interleaving issues with the transaction_status_index_cf by gating
         // writes to that column
         let w_active_transaction_status_index =
             self.active_transaction_status_index.write().unwrap();
-        let primary_index =
-            self.get_primary_index_to_write(slot, &w_active_transaction_status_index)?;
-        self.transaction_status_cf
-            .put_protobuf((primary_index, signature, slot), &status)?;
+        let primary_index = if is_virtual {
+            let primary_index = self.get_primary_index_to_write(slot, &w_active_transaction_status_index)?;
+            self.transaction_status_cf
+                .put_protobuf((primary_index, signature, slot), &status)?;
+            primary_index
+        } else {
+            // todo check, t_transaction_status primary_index use slot is ok? add by jesse
+            let primary_index = *w_active_transaction_status_index;
+            self.t_transaction_status_cf
+                .put_protobuf((primary_index, signature, slot), &status)?;
+            primary_index
+        };
+
+
         for address in writable_keys {
             self.address_signatures_cf.put(
                 (primary_index, *address, slot, signature),
@@ -3673,7 +3684,7 @@ impl Blockstore {
         slots: Vec<(Slot, Option<Hash>)>,
         with_hash: bool,
     ) -> Result<()> {
-        // todo,check, is t slot needed, add by jesse
+        // todo,check, is t slot needed, add by jesse, it seems should add
         self.set_roots(slots.iter().map(|(slot, _hash)| slot))?;
         if with_hash {
             self.set_duplicate_confirmed_slots_and_hashes(
@@ -4601,7 +4612,7 @@ pub fn create_new_ledger(
     // todo, create t slot shreds to genisis, check the entries is same with v slot ok? add by jesse
     let (t_shreds, _) = shredder.entries_to_shreds(
         &block_sign_keypair,
-        &entries,
+        &[],
         true, // is_last_in_slot
         0,    // next_shred_index
         0,    // next_code_index
