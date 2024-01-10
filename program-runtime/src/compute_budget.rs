@@ -20,7 +20,7 @@ use {
 /// anyone in Mainnet-beta today. It can be set by set_loaded_accounts_data_size_limit instruction
 pub const MAX_LOADED_ACCOUNTS_DATA_SIZE_BYTES: usize = 64 * 1024 * 1024;
 
-pub const DEFAULT_INSTRUCTION_COMPUTE_UNIT_LIMIT: u32 = 200_000;
+pub const DEFAULT_INSTRUCTION_COMPUTE_UNIT_LIMIT: u32 = 1_400_000;
 pub const MAX_COMPUTE_UNIT_LIMIT: u32 = 1_400_000;
 const MAX_HEAP_FRAME_BYTES: u32 = 256 * 1024;
 

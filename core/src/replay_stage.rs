@@ -91,6 +91,7 @@ use {
 };
 use solana_accounts_db::contains::Contains;
 use solana_ledger::blockstore::BlockstoreError;
+use solana_sdk::clock::Epoch;
 
 pub const MAX_ENTRY_RECV_PER_ITER: usize = 512;
 pub const SUPERMINORITY_THRESHOLD: f64 = 1f64 / 3f64;
@@ -252,6 +253,7 @@ pub struct ReplayStageConfig {
     // duplicate voting which can lead to slashing.
     pub wait_to_vote_slot: Option<Slot>,
     pub replay_slots_concurrently: bool,
+    pub epoch_update_sender: Sender<Epoch>,
 }
 
 #[derive(Default)]
@@ -535,6 +537,7 @@ impl ReplayStage {
             tower_storage,
             wait_to_vote_slot,
             replay_slots_concurrently,
+            epoch_update_sender,
         } = config;
 
         trace!("replay stage");
@@ -608,6 +611,7 @@ impl ReplayStage {
                     &rpc_subscriptions,
                     &mut progress,
                     &mut replay_timing,
+                    &epoch_update_sender
                 );
                 generate_new_bank_forks_time.stop();
 
@@ -1060,6 +1064,7 @@ impl ReplayStage {
                         &banking_tracer,
                         has_new_vote_been_rooted,
                         transaction_status_sender.is_some(),
+                        &epoch_update_sender,
                     );
 
                     let poh_bank = poh_recorder.read().unwrap().bank();
@@ -1845,6 +1850,7 @@ impl ReplayStage {
         banking_tracer: &Arc<BankingTracer>,
         has_new_vote_been_rooted: bool,
         track_transaction_indexes: bool,
+        epoch_update_sender: &Sender<Epoch>,
     ) {
         // all the individual calls to poh_recorder.read() are designed to
         // increase granularity, decrease contention
@@ -1963,7 +1969,8 @@ impl ReplayStage {
                 my_pubkey,
                 rpc_subscriptions,
                 NewBankOptions { vote_only_bank },
-                t_root_slot
+                t_root_slot,
+                &epoch_update_sender
             );
             // make sure parent is frozen for finalized hashes via the above
             // new()-ing of its child bank
@@ -3888,6 +3895,7 @@ impl ReplayStage {
         rpc_subscriptions: &Arc<RpcSubscriptions>,
         progress: &mut ProgressMap,
         replay_timing: &mut ReplayTiming,
+        epoch_update_sender: &Sender<Epoch>,
     ) {
         // Find the next slot that chains to the old slot
         let mut generate_new_bank_forks_read_lock =
@@ -3964,6 +3972,7 @@ impl ReplayStage {
                     rpc_subscriptions,
                     NewBankOptions::default(),
                     forks.t_root(),
+                    epoch_update_sender
                 );
                 let empty: Vec<Pubkey> = vec![];
                 Self::update_fork_propagated_threshold_from_votes(
@@ -4053,9 +4062,15 @@ impl ReplayStage {
         rpc_subscriptions: &Arc<RpcSubscriptions>,
         new_bank_options: NewBankOptions,
         t_root_slot: u64,
+        epoch_update_sender: &Sender<Epoch>,
     ) -> Bank {
         // todo, check. use parent t slot, and t_root, should be ok, add by jesse
         rpc_subscriptions.notify_slot(slot, parent.slot(), root_slot, parent.t_slot(), t_root_slot);
+        let epoch_schedule = parent.epoch_schedule();
+        let epoch = epoch_schedule.get_epoch(slot);
+        if epoch > parent.epoch() {
+            epoch_update_sender.send(epoch).expect("Epoch update send failed");
+        }
         Bank::new_from_parent_with_options(parent, leader, slot, new_bank_options)
     }
 

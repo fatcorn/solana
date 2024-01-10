@@ -589,7 +589,7 @@ impl Tower {
         let t_old_root = self.t_root();
 
         let mut new_vote = if is_direct_vote_state_update_enabled {
-            warn!("new_vote in is_direct_vote_state_update_enabled");
+            debug!("new_vote in is_direct_vote_state_update_enabled");
             // TODO, input valid args, add by jesse
             let vote = Vote::new(vec![vote_slot], vote_hash, vec![t_vote_slot], t_vote_hash);
             process_vote_unchecked(&mut self.vote_state, vote);
@@ -603,7 +603,7 @@ impl Tower {
                 vote_hash,
             ))
         } else {
-            warn!("-----new_vote not in is_direct_vote_state_update_enabled");
+            debug!("-----new_vote not in is_direct_vote_state_update_enabled");
             Self::apply_vote_and_generate_vote_diff(
                 &mut self.vote_state,
                 vote_slot,
@@ -740,7 +740,7 @@ impl Tower {
 
     pub fn is_locked_out(&self, slot: Slot, ancestors: &HashSet<Slot>, t_slot: Option<Slot>) -> bool {
         if !self.is_recent(slot) {
-            info!("the slot {}, t slot {:?} is not recent, will set locked out", slot, t_slot);
+            debug!("the slot {}, t slot {:?} is not recent, will set locked out", slot, t_slot);
             return true;
         }
 
@@ -753,7 +753,7 @@ impl Tower {
         process_slot_vote_unchecked(&mut vote_state, slot, t_slot);
         for vote in &vote_state.votes {
             if slot != vote.slot() && !ancestors.contains(&vote.slot()) {
-                info!("the slot {}, t slot {:?} is not in vote state votes, will set locked out", slot, t_slot);
+                debug!("the slot {}, t slot {:?} is not in vote state votes, will set locked out", slot, t_slot);
                 return true;
             }
         }

@@ -35,6 +35,7 @@ use {
     solana_ledger::{
         blockstore::Blockstore, blockstore_processor::TransactionStatusSender,
         entry_notifier_service::EntryNotifierSender, leader_schedule_cache::LeaderScheduleCache,
+        blockstore::blockstore_light_service::BlockstoreLightService,
     },
     solana_poh::poh_recorder::PohRecorder,
     solana_rpc::{
@@ -70,6 +71,7 @@ pub struct Tvu {
     warm_quic_cache_service: Option<WarmQuicCacheService>,
     drop_bank_service: DropBankService,
     duplicate_shred_listener: DuplicateShredListener,
+    blockstore_light_service: BlockstoreLightService,
 }
 
 pub struct TvuSockets {
@@ -192,8 +194,9 @@ impl Tvu {
             unbounded();
         let (dumped_slots_sender, dumped_slots_receiver) = unbounded();
         let (popular_pruned_forks_sender, popular_pruned_forks_receiver) = unbounded();
+        let epoch_schedule = *bank_forks.read().unwrap().working_bank().epoch_schedule();
         let window_service = {
-            let epoch_schedule = *bank_forks.read().unwrap().working_bank().epoch_schedule();
+            // let epoch_schedule = *bank_forks.read().unwrap().working_bank().epoch_schedule();
             let repair_info = RepairInfo {
                 bank_forks: bank_forks.clone(),
                 epoch_schedule,
@@ -232,6 +235,7 @@ impl Tvu {
         );
 
         let (ledger_cleanup_slot_sender, ledger_cleanup_slot_receiver) = unbounded();
+        let (epoch_update_sender, epoch_update_receiver) = unbounded();
         let replay_stage_config = ReplayStageConfig {
             vote_account: *vote_account,
             authorized_voter_keypairs,
@@ -251,6 +255,7 @@ impl Tvu {
             tower_storage: tower_storage.clone(),
             wait_to_vote_slot,
             replay_slots_concurrently: tvu_config.replay_slots_concurrently,
+            epoch_update_sender
         };
 
         let (voting_sender, voting_receiver) = unbounded();
@@ -319,10 +324,17 @@ impl Tvu {
             exit,
             cluster_info.clone(),
             DuplicateShredHandler::new(
-                blockstore,
+                blockstore.clone(),
                 leader_schedule_cache.clone(),
                 bank_forks.clone(),
             ),
+        );
+
+        let blockstore_light_service = BlockstoreLightService::new(
+            blockstore,
+            None,
+            epoch_update_receiver,
+            epoch_schedule,
         );
 
         Ok(Tvu {
@@ -338,6 +350,7 @@ impl Tvu {
             warm_quic_cache_service,
             drop_bank_service,
             duplicate_shred_listener,
+            blockstore_light_service,
         })
     }
 
@@ -358,6 +371,7 @@ impl Tvu {
         }
         self.drop_bank_service.join()?;
         self.duplicate_shred_listener.join()?;
+        self.blockstore_light_service.join()?;
         Ok(())
     }
 }

@@ -895,9 +895,10 @@ pub fn process_vote_unchecked(vote_state: &mut VoteState, vote: Vote) {
         0,
         &t_slot_hashes,
     );
-    if !ignored.is_ok() {
-        warn!("process vote failed {:?}", ignored.err());
-    }
+    // todo delete, add by jesse
+    // if !ignored.is_ok() {
+    //     warn!("process vote failed {:?}", ignored.err());
+    // }
 
 }
 

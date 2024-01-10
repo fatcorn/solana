@@ -79,6 +79,8 @@ use {
     trees::{Tree, TreeWalk},
 };
 pub mod blockstore_purge;
+pub mod blockstore_light_service;
+
 pub use {
     crate::{
         blockstore_db::BlockstoreError,
