@@ -27,7 +27,7 @@ struct UnusedAccounts {
 // because it's handled by SerializableVersionedBank.
 // So, sync fields with it!
 #[derive(Clone, Deserialize)]
-struct DeserializableVersionedBank {
+pub struct DeserializableVersionedBank {
     blockhash_queue: BlockhashQueue,
     ancestors: AncestorsForSerialization,
     hash: Hash,
@@ -125,7 +125,7 @@ impl From<DeserializableVersionedBank> for BankFieldsToDeserialize {
 // Serializable version of Bank, not Deserializable to avoid cloning by using refs.
 // Sync fields with DeserializableVersionedBank!
 #[derive(Serialize)]
-struct SerializableVersionedBank<'a> {
+pub struct SerializableVersionedBank<'a> {
     blockhash_queue: &'a RwLock<BlockhashQueue>,
     ancestors: &'a AncestorsForSerialization,
     hash: Hash,
@@ -237,6 +237,14 @@ impl<'a> TypeContext<'a> for Context {
         let ancestors = HashMap::from(&serializable_bank.bank.ancestors);
         let t_ancestors = HashMap::from(&serializable_bank.bank.t_ancestors);
         let fields = serializable_bank.bank.get_fields_to_serialize(&ancestors, &t_ancestors);
+        // todo, check, add t_parent bank serialize to snapshot, add by jesse
+
+        // let t_parent = &serializable_bank.bank.t_parent().unwrap();
+        // let t_parent_ancestors = HashMap::from(&t_parent.ancestors);
+        // let t_parent_t_ancestors = HashMap::from(&t_parent.t_ancestors);
+        //
+        // let t_parent_fields = t_parent.get_fields_to_serialize(&t_parent_ancestors, &t_parent_t_ancestors);
+        // SerializableVersionedBank::from(fields),
         let lamports_per_signature = fields.fee_rate_governor.lamports_per_signature;
         let epoch_reward_status = serializable_bank
             .bank
@@ -247,6 +255,7 @@ impl<'a> TypeContext<'a> for Context {
                 accounts_db: &serializable_bank.bank.rc.accounts.accounts_db,
                 slot: serializable_bank.bank.rc.slot,
                 account_storage_entries: serializable_bank.snapshot_storages,
+                snap_bank: &serializable_bank.bank,
                 phantom: std::marker::PhantomData,
             },
             // Additional fields, we manually store the lamps per signature here so that
@@ -301,6 +310,21 @@ impl<'a> TypeContext<'a> for Context {
             .write_version
             .load(Ordering::Acquire);
 
+        // let t_parent_bank = &serializable_db;
+
+        // if the serializable_db is a t bank, the t_slot parent may be none, so just add the a empty data to this member
+        let mut t_parent_fields_data = vec![];
+        if let Some(t_parent) = &serializable_db.snap_bank.t_parent()  {
+            let t_parent_ancestors = HashMap::from(&t_parent.ancestors);
+            let t_parent_t_ancestors = HashMap::from(&t_parent.t_ancestors);
+
+            let t_parent_fields = t_parent.get_fields_to_serialize(&t_parent_ancestors, &t_parent_t_ancestors);
+            info!("t_parent_exist: t_parent slot: {}, t_slot: {}", t_parent.slot(), t_parent.t_slot());
+            let t_parent_fields  = SerializableVersionedBank::from(t_parent_fields);
+            t_parent_fields_data = bincode::serialize(&t_parent_fields).unwrap();
+        }
+
+
         // (1st of 3 elements) write the list of account storage entry lists out as a map
         let entry_count = RefCell::<usize>::new(0);
         let entries =
@@ -350,6 +374,7 @@ impl<'a> TypeContext<'a> for Context {
             bank_hash_info,
             historical_roots,
             historical_roots_with_hash,
+            t_parent_fields_data
         )
             .serialize(serializer);
         serialize_account_storage_timer.stop();

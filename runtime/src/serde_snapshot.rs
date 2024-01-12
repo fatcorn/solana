@@ -65,6 +65,9 @@ pub(crate) use {
     },
     storage::SerializedAppendVecId,
 };
+use crate::bank::BankFieldsToSerialize;
+use crate::serde_snapshot::newer::DeserializableVersionedBank;
+use crate::serde_snapshot::newer::SerializableVersionedBank;
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub(crate) enum SerdeStyle {
@@ -85,6 +88,8 @@ pub struct AccountsDbFields<T>(
     /// slots that were roots within the last epoch for which we care about the hash value
     #[serde(deserialize_with = "default_on_eof")]
     Vec<(Slot, Hash)>,
+    ///The t_parent_info without accounts db data
+    Vec<u8>,
 );
 
 /// Incremental snapshots only calculate their accounts hash based on the
@@ -161,6 +166,7 @@ impl<T> SnapshotAccountsDbFields<T> {
                 incremental_snapshot_bank_hash_info,
                 incremental_snapshot_historical_roots,
                 incremental_snapshot_historical_roots_with_hash,
+                t_parent_bank
             )) => {
                 let full_snapshot_storages = self.full_snapshot_accounts_db_fields.0;
                 let full_snapshot_slot = self.full_snapshot_accounts_db_fields.2;
@@ -185,6 +191,7 @@ impl<T> SnapshotAccountsDbFields<T> {
                     incremental_snapshot_bank_hash_info,
                     incremental_snapshot_historical_roots,
                     incremental_snapshot_historical_roots_with_hash,
+                    t_parent_bank
                 ))
             }
         }
@@ -558,6 +565,7 @@ struct SerializableAccountsDb<'a, C> {
     accounts_db: &'a AccountsDb,
     slot: Slot,
     account_storage_entries: &'a [Vec<Arc<AccountStorageEntry>>],
+    snap_bank: &'a Bank,
     phantom: std::marker::PhantomData<C>,
 }
 
@@ -576,7 +584,7 @@ impl<'a, C> solana_frozen_abi::abi_example::IgnoreAsHelper for SerializableAccou
 #[allow(clippy::too_many_arguments)]
 fn reconstruct_bank_from_fields<E>(
     bank_fields: SnapshotBankFields,
-    snapshot_accounts_db_fields: SnapshotAccountsDbFields<E>,
+    mut snapshot_accounts_db_fields: SnapshotAccountsDbFields<E>,
     genesis_config: &GenesisConfig,
     runtime_config: &RuntimeConfig,
     account_paths: &[PathBuf],
@@ -602,6 +610,25 @@ where
             .map(|bank_fields| bank_fields.capitalization),
     );
     let bank_fields = bank_fields.collapse_into();
+    let runtime_config = Arc::new(runtime_config.clone());
+
+    let t_parent_bank = if !snapshot_accounts_db_fields.full_snapshot_accounts_db_fields.6.is_empty() {
+        let t_parent_bank_fileds: BankFieldsToDeserialize =
+            deserialize_from::<_, DeserializableVersionedBank>(&mut snapshot_accounts_db_fields.full_snapshot_accounts_db_fields.6.as_slice())?.into();
+        //todo, check, build this t_parent_bank for add t_root bank to bank_forks t_banks,only for generate t_next_slot,
+        // this bank's account state and config do not use in consensus workflow, add by jesse.
+        let t_parent_bank = Bank::new_from_pure_fields(
+            genesis_config,
+            runtime_config.clone(),
+            t_parent_bank_fileds
+        );
+        info!("Reconstruct bank from t parent bank, slot {}, t_slot: {}", t_parent_bank.slot(), t_parent_bank.t_slot());
+        Some(Arc::new(t_parent_bank))
+    } else {
+        None
+    };
+
+
     let (accounts_db, reconstructed_accounts_db_info) = reconstruct_accountsdb_from_fields(
         snapshot_accounts_db_fields,
         account_paths,
@@ -619,11 +646,18 @@ where
         bank_fields.incremental_snapshot_persistence.as_ref(),
     )?;
 
-    let bank_rc = BankRc::new(Accounts::new_empty(accounts_db), bank_fields.slot, bank_fields.t_slot);
-    let runtime_config = Arc::new(runtime_config.clone());
+    let mut bank_rc = BankRc::new(Accounts::new_empty(accounts_db), bank_fields.slot, bank_fields.t_slot);
+
 
     // if limit_load_slot_count_from_snapshot is set, then we need to side-step some correctness checks beneath this call
     let debug_do_not_add_builtins = limit_load_slot_count_from_snapshot.is_some();
+
+
+
+
+    *bank_rc.t_parent.write().unwrap() = t_parent_bank;
+
+
     let bank = Bank::new_from_fields(
         bank_rc,
         genesis_config,
@@ -762,7 +796,7 @@ where
 
     // Store the accounts hash & capitalization, from the full snapshot, in the new AccountsDb
     {
-        let AccountsDbFields(_, _, slot, bank_hash_info, _, _) =
+        let AccountsDbFields(_, _, slot, bank_hash_info, _, _, _) =
             &snapshot_accounts_db_fields.full_snapshot_accounts_db_fields;
 
         if let Some(incremental_snapshot_persistence) = incremental_snapshot_persistence {
@@ -805,7 +839,7 @@ where
 
     // Store the accounts hash & capitalization, from the incremental snapshot, in the new AccountsDb
     {
-        if let Some(AccountsDbFields(_, _, slot, bank_hash_info, _, _)) =
+        if let Some(AccountsDbFields(_, _, slot, bank_hash_info, _, _, _)) =
             snapshot_accounts_db_fields
                 .incremental_snapshot_accounts_db_fields
                 .as_ref()
@@ -814,7 +848,7 @@ where
                 // Use the presence of a BankIncrementalSnapshotPersistence to indicate the
                 // Incremental Accounts Hash feature is enabled, and use its accounts hashes
                 // instead of `BankHashInfo`'s.
-                let AccountsDbFields(_, _, full_slot, full_bank_hash_info, _, _) =
+                let AccountsDbFields(_, _, full_slot, full_bank_hash_info, _, _, _) =
                     &snapshot_accounts_db_fields.full_snapshot_accounts_db_fields;
                 let full_accounts_hash = &full_bank_hash_info.accounts_hash;
                 assert_eq!(
@@ -867,6 +901,7 @@ where
         snapshot_bank_hash_info,
         _snapshot_historical_roots,
         _snapshot_historical_roots_with_hash,
+        _t_parent_bank
     ) = snapshot_accounts_db_fields.collapse_into()?;
 
     // Ensure all account paths exist

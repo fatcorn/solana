@@ -87,7 +87,7 @@ impl BankForks {
         } else {
             bank.t_parent_slot()
         };
-        info!("forks new, root {}, t_root {}", root, t_root );
+        info!("forks new, root {}, t_root {}, t_parent: {:?}", root, t_root, bank.t_parent());
         Self::new_from_banks(&[Arc::new(bank)], root, t_root)
     }
 
@@ -195,7 +195,7 @@ impl BankForks {
         for bank in initial_forks {
 
             banks.insert(bank.slot(), bank.clone());
-            // todo check, check, reboot, only bank is true insert to t_banks? add by jesse
+            // todo check, check, reboot, only bank is true slot insert to t_banks? add by jesse
             if bank.is_include_t_slot() {
                 t_banks.insert(bank.t_slot(), bank.clone());
             }
@@ -210,7 +210,7 @@ impl BankForks {
 
             let t_parents = bank.t_parents();
             for t_parent in t_parents {
-                if t_banks.insert(t_parent.slot(), t_parent.clone()).is_some() {
+                if t_banks.insert(t_parent.t_slot(), t_parent.clone()).is_some() {
                     // All ancestors have already been inserted by another fork
                     break;
                 }

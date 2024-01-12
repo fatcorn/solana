@@ -1373,6 +1373,9 @@ impl Bank {
         let epoch_schedule = parent.epoch_schedule;
         let epoch = epoch_schedule.get_epoch(slot);
 
+        // Set correct bank to rc t_parent, add by jesse
+        let t_parent = if parent.is_include_t_slot() { Arc::clone(parent) } else { parent.t_parent().unwrap() };
+
         let (rc, bank_rc_creation_time_us) = measure_us!({
             let accounts_db = Arc::clone(&parent.rc.accounts.accounts_db);
             accounts_db.insert_default_bank_hash_stats(slot, parent.slot());
@@ -1382,7 +1385,7 @@ impl Bank {
                 slot,
                 bank_id_generator: Arc::clone(&parent.rc.bank_id_generator),
                 // todo, check, just set t_parent to v parent, is ok? add by jesse
-                t_parent: RwLock::new(Some(Arc::clone(parent))),
+                t_parent: RwLock::new(Some(Arc::clone(&t_parent))),
                 // todo, wait for input, may can remove, depending on parent and slot what to use, add by jesse
                 t_slot: RwLock::new(u64::MAX),
             }
@@ -2028,6 +2031,156 @@ impl Bank {
             (
                 "stakes_accounts_load_duration_us",
                 stakes_accounts_load_duration.as_micros(),
+                i64
+            ),
+        );
+        bank
+    }
+
+    //todo, need to check, add by jesse
+    /// Create a bank from explicit arguments and deserialized fields from snapshot
+    #[allow(clippy::float_cmp)]
+    pub(crate) fn new_from_pure_fields(
+        genesis_config: &GenesisConfig,
+        runtime_config: Arc<RuntimeConfig>,
+        fields: BankFieldsToDeserialize,
+    ) -> Self {
+        let now = Instant::now();
+        let ancestors = Ancestors::from(&fields.ancestors);
+        let t_ancestors = Ancestors::from(&fields.t_ancestors);
+        // For backward compatibility, we can only serialize and deserialize
+        // Stakes<Delegation> in BankFieldsTo{Serialize,Deserialize}. But Bank
+        // caches Stakes<StakeAccount>. Below Stakes<StakeAccount> is obtained
+        // from Stakes<Delegation> by reading the full account state from
+        // accounts-db. Note that it is crucial that these accounts are loaded
+        // at the right slot and match precisely with serialized Delegations.
+        // todo check, no need stakes check, cause this t_parent's son wolud check, add by jesse
+        // let stakes = Stakes::new(&fields.stakes, |pubkey| {
+        //     let (account, _slot) = bank_rc.accounts.load_with_fixed_root(&ancestors, pubkey)?;
+        //     Some(account)
+        // })
+        //     .expect(
+        //         "Stakes cache is inconsistent with accounts-db. This can indicate \
+        //     a corrupted snapshot or bugs in cached accounts or accounts-db.",
+        //     );
+        // let stakes_accounts_load_duration = now.elapsed();
+        fn new<T: Default>() -> T {
+            T::default()
+        }
+        let feature_set = new();
+        let mut bank = Self {
+            incremental_snapshot_persistence: fields.incremental_snapshot_persistence,
+            // todo, check, new with a default, cause reconsturct with t_parent, no need for Bank rc, add by jesse
+            rc: BankRc::new(Accounts::default_for_tests(), fields.slot, fields.t_slot),
+            status_cache: new(),
+            blockhash_queue: RwLock::new(fields.blockhash_queue),
+            ancestors,
+            hash: RwLock::new(fields.hash),
+            parent_hash: fields.parent_hash,
+            parent_slot: fields.parent_slot,
+            hard_forks: Arc::new(RwLock::new(fields.hard_forks)),
+            transaction_count: AtomicU64::new(fields.transaction_count),
+            non_vote_transaction_count_since_restart: new(),
+            transaction_error_count: new(),
+            transaction_entries_count: new(),
+            transactions_per_entry_max: new(),
+            tick_height: AtomicU64::new(fields.tick_height),
+            signature_count: AtomicU64::new(fields.signature_count),
+            capitalization: AtomicU64::new(fields.capitalization),
+            max_tick_height: fields.max_tick_height,
+            hashes_per_tick: fields.hashes_per_tick,
+            ticks_per_slot: fields.ticks_per_slot,
+            ns_per_slot: fields.ns_per_slot,
+            genesis_creation_time: fields.genesis_creation_time,
+            slots_per_year: fields.slots_per_year,
+            slot: fields.slot,
+            bank_id: 0,
+            epoch: fields.epoch,
+            block_height: fields.block_height,
+            collector_id: fields.collector_id,
+            collector_fees: AtomicU64::new(fields.collector_fees),
+            fee_rate_governor: fields.fee_rate_governor,
+            collected_rent: AtomicU64::new(fields.collected_rent),
+            // clone()-ing is needed to consider a gated behavior in rent_collector
+            rent_collector: Self::get_rent_collector_from(&fields.rent_collector, fields.epoch),
+            epoch_schedule: fields.epoch_schedule,
+            inflation: Arc::new(RwLock::new(fields.inflation)),
+            // todo, check, new with a default, cause reconsturct with t_parent, won't care about stakes_cache, add by jesse
+            stakes_cache: StakesCache::default(),
+            epoch_stakes: fields.epoch_stakes,
+            is_delta: AtomicBool::new(fields.is_delta),
+            builtin_programs: new(),
+            runtime_config,
+            rewards: new(),
+            cluster_type: Some(genesis_config.cluster_type),
+            lazy_rent_collection: new(),
+            rewards_pool_pubkeys: new(),
+            transaction_debug_keys: None,
+            transaction_log_collector_config: new(),
+            transaction_log_collector: new(),
+            feature_set: Arc::clone(&feature_set),
+            drop_callback: RwLock::new(OptionalDropCallback(None)),
+            freeze_started: AtomicBool::new(fields.hash != Hash::default()),
+            vote_only_bank: false,
+            cost_tracker: RwLock::new(CostTracker::default()),
+            sysvar_cache: RwLock::new(SysvarCache::default()),
+            accounts_data_size_initial : 0,
+            accounts_data_size_delta_on_chain: AtomicI64::new(0),
+            accounts_data_size_delta_off_chain: AtomicI64::new(0),
+            fee_structure: FeeStructure::default(),
+            loaded_programs_cache: Arc::<RwLock<LoadedPrograms>>::default(),
+            check_program_modification_slot: false,
+            epoch_reward_status: EpochRewardStatus::default(),
+
+            // todo check
+            t_hash : RwLock::new(fields.t_hash),
+            t_slot: RwLock::new(fields.t_slot),
+            t_parent_hash:  RwLock::new(fields.t_parent_hash),
+            t_parent_slot:  RwLock::new(fields.t_parent_slot),
+            t_block_height:  RwLock::new(fields.t_block_height),
+            t_ancestors,
+            is_t_slot_exist:  RwLock::new(fields.is_t_slot_exist),
+            t_frozen_flag_from_v_entry: RwLock::new(fields.t_frozen_flag_from_v_entry),
+        };
+        // bank.finish_init(
+        //     genesis_config,
+        //     additional_builtins,
+        //     debug_do_not_add_builtins,
+        // );
+        // bank.fill_missing_sysvar_cache_entries();
+
+        // Sanity assertions between bank snapshot and genesis config
+        // Consider removing from serializable bank state
+        // (BankFieldsToSerialize/BankFieldsToDeserialize) and initializing
+        // from the passed in genesis_config instead (as new()/new_with_paths() already do)
+        // assert_eq!(
+        //     bank.genesis_creation_time, genesis_config.creation_time,
+        //     "Bank snapshot genesis creation time does not match genesis.bin creation time.\
+        //      The snapshot and genesis.bin might pertain to different clusters"
+        // );
+        // assert_eq!(bank.ticks_per_slot, genesis_config.ticks_per_slot);
+        // assert_eq!(
+        //     bank.ns_per_slot,
+        //     genesis_config.poh_config.target_tick_duration.as_nanos()
+        //         * genesis_config.ticks_per_slot as u128
+        // );
+        // assert_eq!(bank.max_tick_height, (bank.slot + 1) * bank.ticks_per_slot);
+        // assert_eq!(
+        //     bank.slots_per_year,
+        //     years_as_slots(
+        //         1.0,
+        //         &genesis_config.poh_config.target_tick_duration,
+        //         bank.ticks_per_slot,
+        //     )
+        // );
+        // assert_eq!(bank.epoch_schedule, genesis_config.epoch_schedule);
+        // assert_eq!(bank.epoch, bank.epoch_schedule.get_epoch(bank.slot));
+
+        datapoint_info!(
+            "bank-new-from-pure-fields",
+            (
+                "accounts_data_len-from-snapshot",
+                fields.accounts_data_len as i64,
                 i64
             ),
         );
@@ -3956,10 +4109,11 @@ impl Bank {
 
         *self.rc.parent.write().unwrap() = None;
         // todo,check,1.t_parent set to None with v_parent together is ok?, only t bank remove the t_parent relation for now add by jesse
-        // todo, check, point 1 not work, it will lead, t_root_bank parent would not purge,so let the t parent delete with v parent delete together add by jesse
-        // if self.is_include_t_slot() {
-        *self.rc.t_parent.write().unwrap() = None;
-        // }
+        // todo, check,2. point 1 not work, it will lead, t_root_bank parent would not purge,so let the t parent delete with v parent delete together add by jesse
+        if self.is_include_t_slot() {
+        // todo, check, for snapshot the t_parent, commented out, it violate for point2, can do this because the bank t_parent, from real t_parent, add by jesse
+            *self.rc.t_parent.write().unwrap() = None;
+        }
 
         let mut squash_cache_time = Measure::start("squash_cache_time");
         roots
