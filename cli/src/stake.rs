@@ -2540,51 +2540,52 @@ pub fn process_delegate_stake(
     }
     let stake_authority = config.signers[stake_authority];
 
-    if !sign_only {
-        // Sanity check the vote account to ensure it is attached to a validator that has recently
-        // voted at the tip of the ledger
-        let vote_account_data = rpc_client
-            .get_account(vote_account_pubkey)
-            .map_err(|err| {
-                CliError::RpcRequestError(format!(
-                    "Vote account not found: {vote_account_pubkey}. error: {err}",
-                ))
-            })?
-            .data;
-
-        let vote_state = VoteState::deserialize(&vote_account_data).map_err(|_| {
-            CliError::RpcRequestError(
-                "Account data could not be deserialized to vote state".to_string(),
-            )
-        })?;
-
-        let sanity_check_result = match vote_state.root_slot {
-            None => Err(CliError::BadParameter(
-                "Unable to delegate. Vote account has no root slot".to_string(),
-            )),
-            Some(root_slot) => {
-                let min_root_slot = rpc_client
-                    .get_slot()?
-                    .saturating_sub(DELINQUENT_VALIDATOR_SLOT_DISTANCE);
-                if root_slot < min_root_slot {
-                    Err(CliError::DynamicProgramError(format!(
-                        "Unable to delegate.  Vote account appears delinquent \
-                                 because its current root slot, {root_slot}, is less than {min_root_slot}"
-                    )))
-                } else {
-                    Ok(())
-                }
-            }
-        };
-
-        if let Err(err) = &sanity_check_result {
-            if !force {
-                sanity_check_result?;
-            } else {
-                println!("--force supplied, ignoring: {err}");
-            }
-        }
-    }
+    // todo check, close root check for temporary, add by jesse
+    // if !sign_only {
+    //     // Sanity check the vote account to ensure it is attached to a validator that has recently
+    //     // voted at the tip of the ledger
+    //     let vote_account_data = rpc_client
+    //         .get_account(vote_account_pubkey)
+    //         .map_err(|err| {
+    //             CliError::RpcRequestError(format!(
+    //                 "Vote account not found: {vote_account_pubkey}. error: {err}",
+    //             ))
+    //         })?
+    //         .data;
+    //
+    //     let vote_state = VoteState::deserialize(&vote_account_data).map_err(|_| {
+    //         CliError::RpcRequestError(
+    //             "Account data could not be deserialized to vote state".to_string(),
+    //         )
+    //     })?;
+    //
+    //     let sanity_check_result = match vote_state.root_slot {
+    //         None => Err(CliError::BadParameter(
+    //             "Unable to delegate. Vote account has no root slot".to_string(),
+    //         )),
+    //         Some(root_slot) => {
+    //             let min_root_slot = rpc_client
+    //                 .get_slot()?
+    //                 .saturating_sub(DELINQUENT_VALIDATOR_SLOT_DISTANCE);
+    //             if root_slot < min_root_slot {
+    //                 Err(CliError::DynamicProgramError(format!(
+    //                     "Unable to delegate.  Vote account appears delinquent \
+    //                              because its current root slot, {root_slot}, is less than {min_root_slot}"
+    //                 )))
+    //             } else {
+    //                 Ok(())
+    //             }
+    //         }
+    //     };
+    //
+    //     if let Err(err) = &sanity_check_result {
+    //         if !force {
+    //             sanity_check_result?;
+    //         } else {
+    //             println!("--force supplied, ignoring: {err}");
+    //         }
+    //     }
+    // }
 
     let recent_blockhash = blockhash_query.get_blockhash(rpc_client, config.commitment)?;
 

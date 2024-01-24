@@ -8,8 +8,8 @@ use solana_sdk::clock::Epoch;
 use solana_sdk::epoch_schedule::EpochSchedule;
 use crate::blockstore::Blockstore;
 
-/// Default delete before 4 epoch slots
-const MAX_VIRTUAL_SLOT_ALIVE_EPOCH: u64 = 4;
+/// Default delete before 2 epoch slots
+const MAX_VIRTUAL_SLOT_ALIVE_EPOCH: u64 = 2;
 
 pub struct BlockstoreLightService {
     t_blockstore_light: JoinHandle<()>,

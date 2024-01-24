@@ -616,6 +616,7 @@ pub fn process_instruction_inner(
             | LoadedProgramType::DelayVisibility => {
                 Err(Box::new(InstructionError::InvalidAccountData) as Box<dyn std::error::Error>)
             }
+            // todo, check, vm entrypoint, add by jesse
             LoadedProgramType::Typed(executable) => execute(invoke_context, executable),
             _ => Err(Box::new(InstructionError::IncorrectProgramId) as Box<dyn std::error::Error>),
         }
