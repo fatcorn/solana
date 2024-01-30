@@ -7579,22 +7579,31 @@ impl Bank {
     fn verify_hash(&self) -> bool {
         assert!(self.is_frozen());
         // todo,solved, check later, add valid args later, add by jesse
-        let calculated_hash = if self.is_include_t_slot()
+        let calculated_hash = self.hash_internal_state(true);
+        let calculated_t_hash = if self.is_include_t_slot()
         {
-            self.hash_internal_state(false)
+            Some(self.hash_internal_state(false))
         } else {
-            self.hash_internal_state(true)
+            None
         };
         let expected_hash = self.hash();
+        let expected_t_hash = if self.is_include_t_slot() {
+            Some(self.t_hash())
+        } else {
+            None
+        };
 
-        if calculated_hash == expected_hash {
+        if calculated_hash == expected_hash && calculated_t_hash == expected_t_hash{
             true
         } else {
             warn!(
-                "verify failed: slot: {}, {} (calculated) != {} (expected)",
+                "verify failed: slot: {}, {} (calculated) != {} (expected), or {:?} calculated_t_hash  != {:?} (expected_t_hash)",
                 self.slot(),
                 calculated_hash,
-                expected_hash
+                expected_hash,
+                calculated_t_hash,
+                expected_t_hash
+
             );
             false
         }
