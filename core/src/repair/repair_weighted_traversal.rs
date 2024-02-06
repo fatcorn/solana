@@ -92,18 +92,74 @@ pub fn get_best_repair_shreds(
             .entry(next.slot())
             .or_insert_with(|| blockstore.meta(next.slot()).unwrap());
 
+        let get_t_slot_meta = |
+                slot: Slot,
+                slot_meta: &SlotMeta,
+                blockstore: &Blockstore,
+            | -> (Option<SlotMeta>, Option<Slot>, bool) {
+
+            let mut need_break_if_without_t_meta = false;
+            for next_slot in  &slot_meta.next_slots {
+                // if a slot's parent slot meta's linked_slot not equal the slot's meta's linked_slot,so the parent include t slot.
+                if let Some(son_meta) = blockstore.meta(*next_slot).unwrap() {
+                    // if exist fork, the difference of parent_slot - son_slot not t eq with parent_t_slot - son_t_slot + 1, it means this parent slot include t_slot
+                    let diff= slot_meta.slot - next_slot; if  diff > 1 && son_meta.linked_slot - diff - 1 != slot_meta.linked_slot {
+                        need_break_if_without_t_meta = true;
+                        break;
+                    }
+                    // if slot meta's linked_slot not eq with parent_meta's, it means this parent slot include t_slot
+                    if son_meta.linked_slot != slot_meta.linked_slot {
+                        need_break_if_without_t_meta = true;
+                        break;
+                    }
+                }
+            };
+            if let Some(t_slot_meta) = blockstore.indeed_meta(slot_meta.linked_slot, false).unwrap() {
+                if t_slot_meta.linked_slot == slot {
+                    return (Some(t_slot_meta), Some(slot_meta.linked_slot), false);
+                }
+            }
+            (None, None, need_break_if_without_t_meta)
+        };
+
+
+
         // May not exist if blockstore purged the SlotMeta due to something
         // like duplicate slots. TODO: Account for duplicate slot may be in orphans, especially
         // if earlier duplicate was already removed
         if let Some(slot_meta) = slot_meta {
+            let (t_slot_meta, next_t_slot, need_break) = get_t_slot_meta(
+                next.slot(),
+                slot_meta,
+                blockstore
+            );
+            if need_break {
+                // if not find t slot meta in blockstore, break and wait for next invoke to generate new repair;
+                // it means must generate new rapairs for slot meta and t_slot meta at same time.
+                warn!("get_best_repair_shreds in repair tree,\
+                 unfounded related t_slot {:?} meta linked with slot {} in blockstore, break", next_t_slot, next.slot());
+                break;
+            }
             match next {
                 Visit::Unvisited(slot) => {
+                    if let Some(t_slot_meta) = t_slot_meta {
+                        let new_t_repairs = RepairService::generate_repairs_for_slot(
+                            blockstore,
+                            next_t_slot.unwrap(),
+                            &t_slot_meta,
+                            max_repairs - repairs.len(),
+                            false
+                        );
+                        repairs.extend(new_t_repairs);
+                    }
                     let new_repairs = RepairService::generate_repairs_for_slot(
                         blockstore,
                         slot,
                         slot_meta,
                         max_repairs - repairs.len(),
+                        true
                     );
+
                     repairs.extend(new_repairs);
                     visited_set.insert(slot);
                 }
@@ -122,6 +178,7 @@ pub fn get_best_repair_shreds(
                                 repairs,
                                 max_repairs,
                                 *new_child_slot,
+                                get_t_slot_meta,
                             );
                         }
                         visited_set.insert(*new_child_slot);

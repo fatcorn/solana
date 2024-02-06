@@ -62,6 +62,8 @@ pub type OutstandingShredRepairs = OutstandingRequests<ShredRepairType>;
 pub type PopularPrunedForksSender = CrossbeamSender<Vec<Slot>>;
 pub type PopularPrunedForksReceiver = CrossbeamReceiver<Vec<Slot>>;
 
+pub struct SlotToTSlots(HashMap<Slot, HashMap<Option<Slot>, u64/* stakes */>>);
+
 #[derive(Default, Debug)]
 pub struct SlotRepairs {
     highest_shred_index: u64,
@@ -73,6 +75,41 @@ impl SlotRepairs {
     pub fn pubkey_repairs(&self) -> &HashMap<Pubkey, u64> {
         &self.pubkey_repairs
     }
+}
+
+impl SlotToTSlots {
+
+    pub fn new() -> Self {
+        Self(HashMap::new())
+    }
+
+    /// Get max stakes t_slot
+    pub fn get_slot_best_t_slots(&self, slot: Slot) -> Option<Slot> {
+        let mut max_stakes_t_slot = None;
+        if let Some(t_candidate_slots) = self.0.get(&slot) {
+            let mut max_stakes = 0;
+            for (k, v) in t_candidate_slots {
+                if *v > max_stakes {
+                    max_stakes_t_slot = *k;
+                    max_stakes = *v;
+                }
+            }
+        }
+        max_stakes_t_slot
+    }
+
+    pub fn add_new_slot_to_t_slot(&mut self, slot: Slot, t_slot: Option<Slot>, vote_stakes: u64) {
+        if let Some(val) = self.0.get_mut(&slot) {
+            if let Some(stakes) = val.get_mut(&t_slot) {
+                *stakes += vote_stakes;
+            }
+        } else {
+            let mut t_slots_map = HashMap::new();
+            t_slots_map.insert(t_slot, vote_stakes);
+            self.0.insert(slot, t_slots_map);
+        }
+    }
+
 }
 
 #[derive(Default, Debug)]
@@ -360,9 +397,9 @@ impl RepairService {
                 verified_vote_receiver
                     .try_iter()
                     .for_each(|(vote_pubkey, vote_slots)| {
-                        for slot in vote_slots {
+                        for vote_slot in vote_slots {
                             slot_to_vote_pubkeys
-                                .entry(slot)
+                                .entry(vote_slot.0)
                                 .or_default()
                                 .push(vote_pubkey);
                         }
@@ -601,6 +638,7 @@ impl RepairService {
         slot: Slot,
         slot_meta: &SlotMeta,
         max_repairs: usize,
+        is_virtual: bool,
     ) -> Vec<ShredRepairType> {
         if max_repairs == 0 || slot_meta.is_full() {
             vec![]
@@ -610,7 +648,7 @@ impl RepairService {
             if let Some(reference_tick) = slot_meta
                 .received
                 .checked_sub(1)
-                .and_then(|index| blockstore.get_data_shred(slot, index, false).ok()?)
+                .and_then(|index| blockstore.get_data_shred(slot, index, is_virtual).ok()?)
                 .and_then(|shred| shred::layout::get_reference_tick(&shred).ok())
                 .map(u64::from)
             {
@@ -634,9 +672,10 @@ impl RepairService {
                     slot_meta.consumed,
                     slot_meta.received,
                     max_repairs,
+                    is_virtual,
                 )
                 .into_iter()
-                .map(|i| ShredRepairType::Shred(slot, i))
+                .map(|i| ShredRepairType::Shred(slot, i, is_virtual))
                 .collect()
         }
     }
@@ -647,17 +686,44 @@ impl RepairService {
         repairs: &mut Vec<ShredRepairType>,
         max_repairs: usize,
         slot: Slot,
+        get_t_slot_meta: fn(slot: Slot, slot_meta: &SlotMeta, blockstore: &Blockstore) -> (Option<SlotMeta>, Option<Slot>, bool),
     ) {
         let mut pending_slots = vec![slot];
         while repairs.len() < max_repairs && !pending_slots.is_empty() {
             let slot = pending_slots.pop().unwrap();
+
+
             if let Some(slot_meta) = blockstore.meta(slot).unwrap() {
+                let (t_slot_meta, next_t_slot, need_break) = get_t_slot_meta(
+                    slot,
+                    &slot_meta,
+                    blockstore
+                );
+                if need_break {
+                    // if not find t slot meta in blockstore, break and wait for next invoke to generate new repair;
+                    // it means must generate new rapairs for slot meta and t_slot meta at same time.
+                    warn!("generate_repairs_for_fork in repair tree,\
+                        unfounded related t_slot {:?} meta linked with slot {} in blockstore, break", next_t_slot, slot);
+                    break;
+                }
                 let new_repairs = Self::generate_repairs_for_slot(
                     blockstore,
                     slot,
                     &slot_meta,
                     max_repairs - repairs.len(),
+                    true
                 );
+                if let Some(t_slot_meta) = t_slot_meta {
+                    let new_t_repairs = Self::generate_repairs_for_slot(
+                        blockstore,
+                        next_t_slot.unwrap(),
+                        &t_slot_meta,
+                        max_repairs - repairs.len(),
+                        false
+                    );
+                    repairs.extend(new_t_repairs);
+                }
+
                 repairs.extend(new_repairs);
                 let next_slots = slot_meta.next_slots;
                 pending_slots.extend(next_slots);

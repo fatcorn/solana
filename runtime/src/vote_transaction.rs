@@ -24,6 +24,18 @@ impl VoteTransaction {
         }
     }
 
+    pub fn t_slots(&self) -> Vec<Option<Slot>> {
+        match self {
+            VoteTransaction::Vote(vote) => vote.t_slots.clone(),
+            // TODO, check VoteStateUpdate use t_slot ok, add by jesse
+            VoteTransaction::VoteStateUpdate(vote_state_update) => vote_state_update
+                .lockouts
+                .iter()
+                .map(|lockout| lockout.t_slot())
+                .collect(),
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
         match self {
             VoteTransaction::Vote(vote) => vote.slots.is_empty(),

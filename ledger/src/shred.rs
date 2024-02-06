@@ -1052,6 +1052,7 @@ pub fn should_discard_shred(
                 error!("get_t_slot");
                 return true;
             };
+            debug!("get slot {slot}, t_slot{t_slot} index {index} is_virtual {is_virtual}");
             // todo, Check, get t slot and t_root for verify_shred_slots valid, add by jesse
             let (slot, root) = if is_virtual { (slot, root) } else { (t_slot, t_root) };
 

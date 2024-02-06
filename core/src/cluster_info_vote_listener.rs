@@ -62,8 +62,8 @@ pub type VerifiedLabelVotePacketsSender = Sender<Vec<VerifiedVoteMetadata>>;
 pub type VerifiedLabelVotePacketsReceiver = Receiver<Vec<VerifiedVoteMetadata>>;
 pub type VerifiedVoteTransactionsSender = Sender<Vec<Transaction>>;
 pub type VerifiedVoteTransactionsReceiver = Receiver<Vec<Transaction>>;
-pub type VerifiedVoteSender = Sender<(Pubkey, Vec<Slot>)>;
-pub type VerifiedVoteReceiver = Receiver<(Pubkey, Vec<Slot>)>;
+pub type VerifiedVoteSender = Sender<(Pubkey, Vec<(Slot, Option<Slot> /*voted t slot*/)>)>;
+pub type VerifiedVoteReceiver = Receiver<(Pubkey, Vec<(Slot, Option<Slot> /*voted t slot*/)>)>;
 pub type GossipVerifiedVoteHashSender = Sender<(Pubkey, Slot, Hash)>;
 pub type GossipVerifiedVoteHashReceiver = Receiver<(Pubkey, Slot, Hash)>;
 pub type GossipDuplicateConfirmedSlotsSender = Sender<ThresholdConfirmedSlots>;
@@ -669,6 +669,7 @@ impl ClusterInfoVoteListener {
         let root = root_bank.slot();
         let mut is_new_vote = false;
         let vote_slots = vote.slots();
+        let t_vote_slots = vote.t_slots();
         // If slot is before the root, ignore it
         for slot in vote_slots.iter().filter(|slot| **slot > root).rev() {
             let slot = *slot;
@@ -755,7 +756,8 @@ impl ClusterInfoVoteListener {
 
         if is_new_vote {
             subscriptions.notify_vote(*vote_pubkey, vote, vote_transaction_signature);
-            let _ = verified_vote_sender.send((*vote_pubkey, vote_slots));
+            let slot_with_t_slots = vote_slots.into_iter().zip(t_vote_slots.into_iter()).collect();
+            let _ = verified_vote_sender.send((*vote_pubkey, slot_with_t_slots));
         }
     }
 

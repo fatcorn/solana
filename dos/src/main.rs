@@ -662,6 +662,7 @@ fn run_dos<T: 'static + BenchTpsClient + Send + Sync>(
                     header,
                     slot,
                     shred_index: 0,
+                    is_virtual: true
                 };
                 ServeRepair::repair_proto_to_bytes(&req, &keypair).unwrap()
             }

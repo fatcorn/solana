@@ -2174,20 +2174,36 @@ impl Blockstore {
         start_index: u64,
         end_index: u64,
         max_missing: usize,
+        is_virtual: bool,
     ) -> Vec<u64> {
+        let cf = if is_virtual { self.db.cf_handle::<cf::ShredData>() } else { self.db.cf_handle::<cf::TShredData>() };
         if let Ok(mut db_iterator) = self
             .db
-            .raw_iterator_cf(self.db.cf_handle::<cf::ShredData>())
+            .raw_iterator_cf(cf)
         {
-            Self::find_missing_indexes::<cf::ShredData>(
-                &mut db_iterator,
-                slot,
-                first_timestamp,
-                defer_threshold_ticks,
-                start_index,
-                end_index,
-                max_missing,
-            )
+
+            let ret = if is_virtual {
+                Self::find_missing_indexes::<cf::ShredData>(
+                    &mut db_iterator,
+                    slot,
+                    first_timestamp,
+                    defer_threshold_ticks,
+                    start_index,
+                    end_index,
+                    max_missing,
+                )
+            } else {
+                Self::find_missing_indexes::<cf::TShredData>(
+                    &mut db_iterator,
+                    slot,
+                    first_timestamp,
+                    defer_threshold_ticks,
+                    start_index,
+                    end_index,
+                    max_missing,
+                )
+            };
+            ret
         } else {
             vec![]
         }
@@ -4252,6 +4268,8 @@ impl Blockstore {
                 // fill in the parent now that we know it.
                 if is_orphan(&meta) {
                     meta.parent_slot = Some(parent_slot);
+                    // if meta is orphan, so it could create by his son, set correct linked_slot in this place.
+                    meta.linked_slot = linked_slot;
                 }
 
                 SlotMetaWorkingSetEntry::new(Rc::new(RefCell::new(meta)), backup)
@@ -4307,8 +4325,8 @@ impl Blockstore {
             // If this slot doesn't exist, make a orphan slot. This way we
             // remember which slots chained to this one when we eventually get a real shred
             // for this slot
-            // todo check, if slot not found in db, so its linked slot set to 0, add by jesse
-            insert_map.insert(slot, Rc::new(RefCell::new(SlotMeta::new_orphan(slot, 0))));
+            // todo check, if slot not found in db, so its linked slot set to MAX, add by jesse
+            insert_map.insert(slot, Rc::new(RefCell::new(SlotMeta::new_orphan(slot, u64::MAX))));
         }
         Ok(insert_map.get(&slot).unwrap().clone())
     }

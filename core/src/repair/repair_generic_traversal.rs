@@ -1,3 +1,5 @@
+use std::thread::sleep;
+use std::time::Duration;
 use {
     crate::{
         consensus::{heaviest_subtree_fork_choice::HeaviestSubtreeForkChoice, tree_diff::TreeDiff},
@@ -66,6 +68,7 @@ pub fn get_unknown_last_index(
                     slot_meta.consumed
                 };
                 unknown_last.push((slot, slot_meta.received, num_processed_shreds));
+                info!("unknown_last_index processed slot {slot}");
                 processed_slots.insert(slot);
             }
         }
@@ -182,16 +185,62 @@ pub fn get_closest_completion(
             if repairs.len() >= limit {
                 break;
             }
-            if !processed_slots.insert(path_slot) {
-                continue;
-            }
+
             let slot_meta = slot_meta_cache.get(&path_slot).unwrap().as_ref().unwrap();
+            let get_t_slot_meta = |
+                slot: Slot,
+                slot_meta: &SlotMeta,
+                blockstore: &Blockstore,
+            | -> (Option<SlotMeta>, Option<Slot>, bool) {
+                let mut need_break_if_without_t_meta = false;
+                for next_slot in  &slot_meta.next_slots {
+                    // if a slot's parent slot meta's linked_slot not equal the slot's meta's linked_slot,so the parent include t slot.
+                    if let Some(son_meta) = blockstore.meta(*next_slot).unwrap() {
+                        // if slot meta's linked_slot not eq with parent_meta's, it means this slot include t_slot
+                        if son_meta.linked_slot != slot_meta.linked_slot {
+                            need_break_if_without_t_meta = true;
+                            break;
+                        }
+                    }
+                };
+                if let Some(t_slot_meta) = blockstore.indeed_meta(slot_meta.linked_slot, false).unwrap() {
+                    if t_slot_meta.linked_slot == slot {
+                        return (Some(t_slot_meta), Some(slot_meta.linked_slot), false);
+                    }
+                }
+                (None, None, need_break_if_without_t_meta)
+            };
+            let (t_slot_meta, t_parent_slot, need_break) = get_t_slot_meta(path_slot, slot_meta, blockstore);
+
+            if need_break {
+                // if not find t slot meta in blockstore, break and wait for next invoke to generate new repair;
+                // it means must generate new rapairs for slot meta and t_slot meta at same time.
+                warn!("get_closest_completion in repair tree,\
+                 unfounded related t_slot {:?} meta linked with slot {} in blockstore, break", t_parent_slot, path_slot);
+                break;
+            }
+
+            if let Some(t_slot_meta) = t_slot_meta {
+                let new_t_repairs = RepairService::generate_repairs_for_slot(
+                    blockstore,
+                    t_parent_slot.unwrap(),
+                    &t_slot_meta,
+                    limit - repairs.len(),
+                    false
+                );
+                repairs.extend(new_t_repairs);
+            }
+
             let new_repairs = RepairService::generate_repairs_for_slot(
                 blockstore,
                 path_slot,
                 slot_meta,
                 limit - repairs.len(),
+                true
             );
+            if !processed_slots.insert(path_slot) {
+                continue;
+            }
             repairs.extend(new_repairs);
             total_processed_slots += 1;
         }

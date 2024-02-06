@@ -58,6 +58,7 @@ use {
         time::{Duration, Instant},
     },
 };
+use solana_ledger::blockstore::SlotMeta;
 
 /// the number of slots to respond with when responding to `Orphan` requests
 pub const MAX_ORPHAN_REPAIR_RESPONSES: usize = 11;
@@ -92,18 +93,19 @@ static_assertions::const_assert_eq!(MAX_ANCESTOR_RESPONSES, 30);
 pub enum ShredRepairType {
     /// Requesting `MAX_ORPHAN_REPAIR_RESPONSES ` parent shreds
     Orphan(Slot),
+    // todo, check, ignore the HighestShred for t_slot for now, add by jesse
     /// Requesting any shred with index greater than or equal to the particular index
     HighestShred(Slot, u64),
     /// Requesting the missing shred at a particular index
-    Shred(Slot, u64),
+    Shred(Slot, u64, bool/*is_virtual*/),
 }
 
 impl ShredRepairType {
     pub fn slot(&self) -> Slot {
         match self {
             ShredRepairType::Orphan(slot) => *slot,
-            ShredRepairType::HighestShred(slot, _) => *slot,
-            ShredRepairType::Shred(slot, _) => *slot,
+            ShredRepairType::HighestShred(slot, ..) => *slot,
+            ShredRepairType::Shred(slot, ..) => *slot,
         }
     }
 }
@@ -112,9 +114,9 @@ impl RequestResponse for ShredRepairType {
     type Response = Shred;
     fn num_expected_responses(&self) -> u32 {
         match self {
-            ShredRepairType::Orphan(_) => (MAX_ORPHAN_REPAIR_RESPONSES) as u32,
-            ShredRepairType::HighestShred(_, _) => 1,
-            ShredRepairType::Shred(_, _) => 1,
+            ShredRepairType::Orphan(_) => (MAX_ORPHAN_REPAIR_RESPONSES * 2) as u32,
+            ShredRepairType::HighestShred(_, _) => 1 * 2,
+            ShredRepairType::Shred(_, _, _) => 1,
         }
     }
     fn verify_response(&self, response_shred: &Shred) -> bool {
@@ -123,8 +125,11 @@ impl RequestResponse for ShredRepairType {
             ShredRepairType::HighestShred(slot, index) => {
                 response_shred.slot() == *slot && response_shred.index() as u64 >= *index
             }
-            ShredRepairType::Shred(slot, index) => {
-                response_shred.slot() == *slot && response_shred.index() as u64 == *index
+            ShredRepairType::Shred(slot, index, is_virtual) => {
+                if *is_virtual {
+                    return response_shred.slot() == *slot && response_shred.index() as u64 == *index
+                }
+                response_shred.t_slot() == *slot && response_shred.index() as u64 == *index
             }
         }
     }
@@ -228,6 +233,7 @@ pub enum RepairProtocol {
         header: RepairRequestHeader,
         slot: Slot,
         shred_index: u64,
+        is_virtual: bool,
     },
     HighestWindowIndex {
         header: RepairRequestHeader,
@@ -410,6 +416,7 @@ impl ServeRepair {
                     header: RepairRequestHeader { nonce, .. },
                     slot,
                     shred_index,
+                    is_virtual
                 } => {
                     stats.window_index += 1;
                     let batch = Self::run_window_request(
@@ -419,6 +426,7 @@ impl ServeRepair {
                         *slot,
                         *shred_index,
                         *nonce,
+                        *is_virtual,
                     );
                     if batch.is_none() {
                         stats.window_index_misses += 1;
@@ -1121,7 +1129,7 @@ impl ServeRepair {
             nonce,
         };
         let request_proto = match repair_request {
-            ShredRepairType::Shred(slot, shred_index) => {
+            ShredRepairType::Shred(slot, shred_index, is_virtual) => {
                 repair_stats
                     .shred
                     .update(repair_peer_id, *slot, *shred_index);
@@ -1129,6 +1137,7 @@ impl ServeRepair {
                     header,
                     slot: *slot,
                     shred_index: *shred_index,
+                    is_virtual: *is_virtual,
                 }
             }
             ShredRepairType::HighestShred(slot, shred_index) => {
@@ -1238,6 +1247,7 @@ impl ServeRepair {
         slot: Slot,
         shred_index: u64,
         nonce: Nonce,
+        is_virtual: bool,
     ) -> Option<PacketBatch> {
         // Try to find the requested index in one of the slots
         let packet = repair_response::repair_response_packet(
@@ -1246,6 +1256,7 @@ impl ServeRepair {
             shred_index,
             from_addr,
             nonce,
+            is_virtual
         )?;
         Some(PacketBatch::new_unpinned_with_recycler_data(
             recycler,
@@ -1263,20 +1274,46 @@ impl ServeRepair {
         nonce: Nonce,
     ) -> Option<PacketBatch> {
         // Try to find the requested index in one of the slots
-        let meta = blockstore.meta(slot).ok()??;
+        // let meta = blockstore.meta(slot).ok()??;
+        let get_meta_with_t_meta = |blockstore: &Blockstore, slot: Slot| {
+            let slot_meta = blockstore.indeed_meta(slot, true).ok()?;
+            if let Some(meta) = slot_meta {
+                let t_slot_meta = blockstore.indeed_meta(meta.linked_slot, false).ok()?;
+                if let Some(t_slot_meta) = t_slot_meta {
+                    if t_slot_meta.linked_slot == meta.slot {
+                        return Some((meta, Some(t_slot_meta)));
+                    }
+                }
+                return Some((meta, None));
+            }
+            None
+        };
+        let (meta, t_meta) = get_meta_with_t_meta(blockstore, slot)?;
         if meta.received > highest_index {
             // meta.received must be at least 1 by this point
-            let packet = repair_response::repair_response_packet(
-                blockstore,
-                slot,
-                meta.received - 1,
-                from_addr,
-                nonce,
-            )?;
+            let get_packet = |slot: Slot, meta: &SlotMeta, is_virtual: bool| {
+                repair_response::repair_response_packet(
+                    blockstore,
+                    slot,
+                    meta.received - 1,
+                    from_addr,
+                    nonce,
+                    is_virtual
+                )
+            };
+            let mut packets = vec![];
+            let packet = get_packet(slot, &meta, true)?;
+            packets.push(packet);
+            if let Some(t_meta) = t_meta {
+                if let Some(packet) = get_packet(t_meta.slot, &t_meta, false) {
+                    packets.push(packet);
+                }
+            }
+
             return Some(PacketBatch::new_unpinned_with_recycler_data(
                 recycler,
                 "run_highest_window_request",
-                vec![packet],
+                packets,
             ));
         }
         None
@@ -1291,22 +1328,57 @@ impl ServeRepair {
         nonce: Nonce,
     ) -> Option<PacketBatch> {
         let mut res =
-            PacketBatch::new_unpinned_with_recycler(recycler, max_responses, "run_orphan");
+            PacketBatch::new_unpinned_with_recycler(recycler, max_responses * 2, "run_orphan");
+
+        let get_meta_with_t_meta = |blockstore: &Blockstore, slot: Slot| {
+            let slot_meta = blockstore.indeed_meta(slot, true).ok()?;
+            if let Some(meta) = slot_meta {
+                let t_slot_meta = blockstore.indeed_meta(meta.linked_slot, false).ok()?;
+                if let Some(t_slot_meta) = t_slot_meta {
+                    if t_slot_meta.linked_slot == meta.slot {
+                        return Some((meta, Some(t_slot_meta)));
+                    }
+                }
+                return Some((meta, None));
+            }
+            None
+        };
+
         // Try to find the next "n" parent slots of the input slot
-        let packets = std::iter::successors(blockstore.meta(slot).ok()?, |meta| {
-            blockstore.meta(meta.parent_slot?).ok()?
+        let packets = std::iter::successors(get_meta_with_t_meta(blockstore, slot), |meta| {
+            get_meta_with_t_meta(blockstore, meta.0.parent_slot?)
         })
         .map_while(|meta| {
-            repair_response::repair_response_packet(
+            let ret = repair_response::repair_response_packet(
                 blockstore,
-                meta.slot,
-                meta.received.checked_sub(1u64)?,
+                meta.0.slot,
+                meta.0.received.checked_sub(1u64)?,
                 from_addr,
                 nonce,
-            )
+                true,
+            );
+
+            let t_packet= if let Some(t_slot_meta) = meta.1 {
+                repair_response::repair_response_packet(
+                    blockstore,
+                    t_slot_meta.slot,
+                    t_slot_meta.received.checked_sub(1u64)?,
+                    from_addr,
+                    nonce,
+                    false,
+                )
+            } else { None };
+            if let Some(packet) = ret {
+               return Some((packet, t_packet));
+            }
+            None
+
         });
-        for packet in packets.take(max_responses) {
+        for (packet, t_packet) in packets.take(max_responses) {
             res.push(packet);
+            if let Some(t_packet) = t_packet {
+                res.push(t_packet);
+            }
         }
         (!res.is_empty()).then_some(res)
     }

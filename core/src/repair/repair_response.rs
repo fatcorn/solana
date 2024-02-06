@@ -13,10 +13,12 @@ pub fn repair_response_packet(
     shred_index: u64,
     dest: &SocketAddr,
     nonce: Nonce,
+    is_virtual: bool,
 ) -> Option<Packet> {
+    debug!("slot {slot} index {shred_index} request received, is_virtual {is_virtual}");
     // todo, important, the is_virtual should input from outside func, add by jesse
     let shred = blockstore
-        .get_data_shred(slot, shred_index, true)
+        .get_data_shred(slot, shred_index, is_virtual)
         .expect("Blockstore could not get data shred");
     shred
         .map(|shred| repair_response_packet_from_bytes(shred, dest, nonce))

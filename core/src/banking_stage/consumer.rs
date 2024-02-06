@@ -165,12 +165,12 @@ impl Consumer {
         is_vote: bool
     ) -> Option<Vec<usize>> {
         if payload.reached_end_of_slot {
-            warn!("payload reached_end_of_slot");
+            info!("payload reached_end_of_slot");
             return None;
         }
 
         let packets_to_process_len = packets_to_process.len();
-        warn!("packets_to_process {}", packets_to_process_len);
+        debug!("packets_to_process {}", packets_to_process_len);
         let (process_transactions_summary, process_packets_transactions_us) = measure_us!(self
             .process_packets_transactions(
                 &bank_start.working_bank,
